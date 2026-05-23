@@ -1,0 +1,113 @@
+const express = require('express');
+const axios = require('axios');
+const router = express.Router();
+
+const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
+
+// Lista de criptomoedas populares
+router.get('/list', async (req, res) => {
+  try {
+    const response = await axios.get(`${COINGECKO_BASE}/coins/markets`, {
+      params: {
+        vs_currency: 'usd',
+        order: 'market_cap_desc',
+        per_page: 50,
+        page: 1,
+        sparkline: false,
+        price_change_percentage: '24h,7d,30d'
+      }
+    });
+
+    const cryptos = response.data.map(coin => ({
+      id: coin.id,
+      symbol: coin.symbol.toUpperCase(),
+      name: coin.name,
+      price: coin.current_price,
+      change24h: coin.price_change_percentage_24h,
+      change7d: coin.price_change_percentage_7d_in_currency,
+      change30d: coin.price_change_percentage_30d_in_currency,
+      marketCap: coin.market_cap,
+      volume24h: coin.total_volume,
+      image: coin.image,
+      high24h: coin.high_24h,
+      low24h: coin.low_24h,
+      rank: coin.market_cap_rank
+    }));
+
+    res.json(cryptos);
+
+  } catch (error) {
+    console.error('Error fetching crypto list:', error.message);
+    res.status(500).json({ error: 'Failed to fetch crypto data' });
+  }
+});
+
+// Dados de uma criptomoeda específica
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const response = await axios.get(`${COINGECKO_BASE}/coins/${id}`, {
+      params: {
+        localization: false,
+        tickers: false,
+        market_data: true,
+        community_data: false,
+        developer_data: false
+      }
+    });
+
+    const data = response.data;
+
+    res.json({
+      id: data.id,
+      symbol: data.symbol.toUpperCase(),
+      name: data.name,
+      description: data.description.en,
+      currentPrice: data.market_data.current_price.usd,
+      marketCap: data.market_data.market_cap.usd,
+      volume24h: data.market_data.total_volume.usd,
+      priceChange24h: data.market_data.price_change_percentage_24h,
+      priceChange7d: data.market_data.price_change_percentage_7d,
+      priceChange30d: data.market_data.price_change_percentage_30d,
+      high24h: data.market_data.high_24h.usd,
+      low24h: data.market_data.low_24h.usd,
+      circulatingSupply: data.market_data.circulating_supply,
+      totalSupply: data.market_data.total_supply,
+      maxSupply: data.market_data.max_supply,
+      image: data.image?.large,
+      rank: data.market_cap_rank
+    });
+
+  } catch (error) {
+    console.error('Error fetching crypto:', error.message);
+    res.status(500).json({ error: 'Failed to fetch crypto data' });
+  }
+});
+
+// Histórico de preço
+router.get('/:id/history', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { days = 30 } = req.query;
+
+    const response = await axios.get(`${COINGECKO_BASE}/coins/${id}/market_chart`, {
+      params: {
+        vs_currency: 'usd',
+        days: parseInt(days)
+      }
+    });
+
+    res.json({
+      prices: response.data.prices,
+      market_caps: response.data.market_caps,
+      volumes: response.data.total_volumes
+    });
+
+  } catch (error) {
+    console.error('Error fetching crypto history:', error.message);
+    res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
+module.exports = router;
