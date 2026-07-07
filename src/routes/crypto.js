@@ -2,16 +2,17 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 
-const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
+const COINGECKO_PLAN = (process.env.COINGECKO_API_PLAN || 'demo').toLowerCase();
+const COINGECKO_BASE = process.env.COINGECKO_API_BASE_URL
+  || (COINGECKO_PLAN === 'pro' ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3');
 
 function coinGeckoHeaders() {
   const apiKey = process.env.COINGECKO_API_KEY;
   if (!apiKey) return {};
 
-  return {
-    'x-cg-demo-api-key': apiKey,
-    'x-cg-pro-api-key': apiKey,
-  };
+  return COINGECKO_PLAN === 'pro'
+    ? { 'x-cg-pro-api-key': apiKey }
+    : { 'x-cg-demo-api-key': apiKey };
 }
 
 function coinGeckoConfig(params = {}) {
@@ -20,6 +21,19 @@ function coinGeckoConfig(params = {}) {
     headers: coinGeckoHeaders(),
     timeout: 12000,
   };
+}
+
+function cryptoError(res, error, message) {
+  const status = error.response?.status || 500;
+  const providerMessage = error.response?.data?.error || error.response?.data?.status?.error_message || error.message;
+  console.error(message, providerMessage);
+  res.status(status >= 400 && status < 600 ? status : 500).json({
+    error: message,
+    provider: 'coingecko',
+    providerStatus: error.response?.status || null,
+    providerMessage,
+    plan: COINGECKO_PLAN,
+  });
 }
 
 // Lista de criptomoedas populares
@@ -49,14 +63,14 @@ router.get('/list', async (req, res) => {
       low24h: coin.low_24h,
       rank: coin.market_cap_rank,
       source: 'coingecko',
+      plan: COINGECKO_PLAN,
       updatedAt: new Date().toISOString()
     }));
 
     res.json(cryptos);
 
   } catch (error) {
-    console.error('Error fetching crypto list:', error.message);
-    res.status(500).json({ error: 'Failed to fetch crypto data' });
+    cryptoError(res, error, 'Failed to fetch crypto data');
   }
 });
 
@@ -94,12 +108,12 @@ router.get('/:id', async (req, res) => {
       image: data.image?.large,
       rank: data.market_cap_rank,
       source: 'coingecko',
+      plan: COINGECKO_PLAN,
       updatedAt: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('Error fetching crypto:', error.message);
-    res.status(500).json({ error: 'Failed to fetch crypto data' });
+    cryptoError(res, error, 'Failed to fetch crypto data');
   }
 });
 
@@ -119,12 +133,12 @@ router.get('/:id/history', async (req, res) => {
       market_caps: response.data.market_caps,
       volumes: response.data.total_volumes,
       source: 'coingecko',
+      plan: COINGECKO_PLAN,
       updatedAt: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('Error fetching crypto history:', error.message);
-    res.status(500).json({ error: 'Failed to fetch history' });
+    cryptoError(res, error, 'Failed to fetch history');
   }
 });
 
