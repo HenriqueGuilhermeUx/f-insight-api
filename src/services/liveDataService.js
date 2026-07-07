@@ -15,6 +15,12 @@ let runtimeCache = {
     lastMacroRefreshAt: null,
     source: 'memory',
   },
+  db: {
+    news: null,
+    indicators: null,
+    macro: null,
+    refreshRuns: null,
+  },
 };
 
 function stableId(...parts) {
@@ -60,14 +66,32 @@ function normalizeFinnhubNews(item, category = 'general') {
   };
 }
 
+function updateDbStatus(key, ok, detail = {}) {
+  runtimeCache.db[key] = {
+    ok,
+    checkedAt: new Date().toISOString(),
+    ...detail,
+  };
+}
+
 async function recordRefreshRun(kind, status, metadata = {}) {
-  if (!isSupabaseEnabled()) return;
-  await supabase.from('market_refresh_runs').insert({
+  if (!isSupabaseEnabled()) return { ok: false, skipped: true, reason: 'supabase-disabled' };
+
+  const { error } = await supabase.from('market_refresh_runs').insert({
     kind,
     status,
     metadata,
     ran_at: new Date().toISOString(),
   });
+
+  if (error) {
+    updateDbStatus('refreshRuns', false, { error: error.message });
+    console.warn('Failed to record refresh run:', error.message);
+    return { ok: false, error: error.message };
+  }
+
+  updateDbStatus('refreshRuns', true);
+  return { ok: true };
 }
 
 async function getCachedNews(limit = 20, category = 'all') {
@@ -84,6 +108,7 @@ async function getCachedNews(limit = 20, category = 'all') {
 
     const { data, error } = await query;
     if (!error && Array.isArray(data) && data.length > 0) {
+      updateDbStatus('news', true, { readCount: data.length });
       return data.map((item) => ({
         id: item.provider_id,
         title: item.title,
@@ -96,6 +121,8 @@ async function getCachedNews(limit = 20, category = 'all') {
         sentiment: item.sentiment || 'neutral',
       }));
     }
+
+    if (error) updateDbStatus('news', false, { error: error.message });
   }
 
   return runtimeCache.news.slice(0, limit);
@@ -129,6 +156,9 @@ async function refreshNews(categories = DEFAULT_NEWS_CATEGORIES) {
     runtimeCache.news = unique;
     runtimeCache.status.lastNewsRefreshAt = new Date().toISOString();
 
+    let persisted = false;
+    let persistError = null;
+
     if (isSupabaseEnabled() && unique.length > 0) {
       const rows = unique.map((item) => ({
         provider: 'finnhub',
@@ -149,16 +179,24 @@ async function refreshNews(categories = DEFAULT_NEWS_CATEGORIES) {
         .from('market_news')
         .upsert(rows, { onConflict: 'provider,provider_id' });
 
-      if (error) throw error;
+      if (error) {
+        persistError = error.message;
+        updateDbStatus('news', false, { error: error.message });
+      } else {
+        persisted = true;
+        updateDbStatus('news', true, { writeCount: rows.length });
+      }
     }
 
-    await recordRefreshRun('news', 'success', {
+    await recordRefreshRun('news', persistError ? 'partial' : 'success', {
       count: unique.length,
+      persisted,
+      persistError,
       durationMs: Date.now() - startedAt,
       categories,
     });
 
-    return { ok: true, count: unique.length, data: unique };
+    return { ok: true, count: unique.length, persisted, persistError, data: unique };
   } catch (error) {
     await recordRefreshRun('news', 'error', { message: error.message });
     throw error;
@@ -225,6 +263,9 @@ async function refreshIndicators(symbols = DEFAULT_SYMBOLS) {
     });
     runtimeCache.status.lastIndicatorsRefreshAt = new Date().toISOString();
 
+    let persisted = false;
+    let persistError = null;
+
     if (isSupabaseEnabled() && snapshots.length > 0) {
       const rows = snapshots.map((item) => ({
         symbol: item.symbol,
@@ -240,16 +281,24 @@ async function refreshIndicators(symbols = DEFAULT_SYMBOLS) {
         .from('market_indicator_snapshots')
         .upsert(rows, { onConflict: 'symbol,provider' });
 
-      if (error) throw error;
+      if (error) {
+        persistError = error.message;
+        updateDbStatus('indicators', false, { error: error.message });
+      } else {
+        persisted = true;
+        updateDbStatus('indicators', true, { writeCount: rows.length });
+      }
     }
 
-    await recordRefreshRun('indicators', 'success', {
+    await recordRefreshRun('indicators', persistError ? 'partial' : 'success', {
       count: snapshots.length,
+      persisted,
+      persistError,
       durationMs: Date.now() - startedAt,
       symbols,
     });
 
-    return { ok: true, count: snapshots.length, data: snapshots };
+    return { ok: true, count: snapshots.length, persisted, persistError, data: snapshots };
   } catch (error) {
     await recordRefreshRun('indicators', 'error', { message: error.message });
     throw error;
@@ -262,41 +311,91 @@ async function refreshMacroAndPersist() {
     const macro = await refreshMacroData();
     runtimeCache.status.lastMacroRefreshAt = new Date().toISOString();
 
+    let persisted = false;
+    let persistError = null;
+
     if (isSupabaseEnabled()) {
-      await supabase.from('market_macro_snapshots').insert({
+      const { error } = await supabase.from('market_macro_snapshots').insert({
         source: macro.source,
         payload: macro,
         fetched_at: macro.updatedAt || new Date().toISOString(),
       });
+
+      if (error) {
+        persistError = error.message;
+        updateDbStatus('macro', false, { error: error.message });
+      } else {
+        persisted = true;
+        updateDbStatus('macro', true);
+      }
     }
 
-    await recordRefreshRun('macro', 'success', {
+    await recordRefreshRun('macro', persistError ? 'partial' : 'success', {
+      persisted,
+      persistError,
       durationMs: Date.now() - startedAt,
       source: macro.source,
     });
 
-    return { ok: true, data: macro };
+    return { ok: true, persisted, persistError, data: macro };
   } catch (error) {
     await recordRefreshRun('macro', 'error', { message: error.message });
     throw error;
   }
 }
 
+async function getTableCount(table) {
+  if (!isSupabaseEnabled()) return { ok: false, count: null, error: 'supabase-disabled' };
+  const { count, error } = await supabase
+    .from(table)
+    .select('*', { count: 'exact', head: true });
+
+  if (error) return { ok: false, count: null, error: error.message };
+  return { ok: true, count };
+}
+
 async function getLiveStatus() {
-  let dbStatus = null;
+  let dbStatus = [];
+  let refreshRunsError = null;
+  let tables = null;
+
   if (isSupabaseEnabled()) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('market_refresh_runs')
       .select('kind,status,ran_at,metadata')
       .order('ran_at', { ascending: false })
       .limit(10);
-    dbStatus = data || [];
+
+    if (error) {
+      refreshRunsError = error.message;
+      updateDbStatus('refreshRuns', false, { error: error.message });
+    } else {
+      dbStatus = data || [];
+      updateDbStatus('refreshRuns', true, { readCount: dbStatus.length });
+    }
+
+    const [marketNews, marketIndicators, marketMacro, marketRefreshRuns] = await Promise.all([
+      getTableCount('market_news'),
+      getTableCount('market_indicator_snapshots'),
+      getTableCount('market_macro_snapshots'),
+      getTableCount('market_refresh_runs'),
+    ]);
+
+    tables = {
+      market_news: marketNews,
+      market_indicator_snapshots: marketIndicators,
+      market_macro_snapshots: marketMacro,
+      market_refresh_runs: marketRefreshRuns,
+    };
   }
 
   return {
     supabase: isSupabaseEnabled(),
     cache: runtimeCache.status,
+    db: runtimeCache.db,
+    tables,
     lastRuns: dbStatus,
+    refreshRunsError,
     macro: getMacroData(),
   };
 }
