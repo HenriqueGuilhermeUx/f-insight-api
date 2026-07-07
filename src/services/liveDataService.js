@@ -3,6 +3,7 @@ const { supabase, isSupabaseEnabled } = require('./supabaseClient');
 const { refreshMacroData, getMacroData } = require('./macroService');
 
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
+const YAHOO_CHART_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
 const DEFAULT_NEWS_CATEGORIES = ['general', 'forex', 'crypto', 'technology'];
 const DEFAULT_SYMBOLS = ['PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'BBDC4.SA', 'WEGE3.SA'];
 
@@ -203,13 +204,19 @@ async function refreshNews(categories = DEFAULT_NEWS_CATEGORIES) {
   }
 }
 
+function compactSeries(values = []) {
+  return values.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value : null));
+}
+
 function calculateIndicators(close, high, low, open, volume, timestamps) {
+  const validClose = compactSeries(close).filter((value) => value !== null);
   const slice = (arr, n) => Array.isArray(arr) ? arr.slice(-n) : [];
-  const last = slice(close, 1)[0] || 0;
-  const previous = slice(close, 2)[0] || last;
+  const last = slice(validClose, 1)[0] || 0;
+  const previous = slice(validClose, 2)[0] || last;
   const change = last - previous;
   const changePercent = previous ? (change / previous) * 100 : 0;
-  const avgVolume = slice(volume, 20).reduce((a, b) => a + b, 0) / Math.max(slice(volume, 20).length, 1);
+  const validVolume = compactSeries(volume).filter((value) => value !== null);
+  const avgVolume = slice(validVolume, 20).reduce((a, b) => a + b, 0) / Math.max(slice(validVolume, 20).length, 1);
 
   return {
     lastPrice: last,
@@ -217,17 +224,17 @@ function calculateIndicators(close, high, low, open, volume, timestamps) {
     changePercent,
     avgVolume,
     candles: {
-      close: slice(close, 100),
-      high: slice(high, 100),
-      low: slice(low, 100),
-      open: slice(open, 100),
-      volume: slice(volume, 100),
-      timestamp: slice(timestamps, 100),
+      close: slice(compactSeries(close), 100),
+      high: slice(compactSeries(high), 100),
+      low: slice(compactSeries(low), 100),
+      open: slice(compactSeries(open), 100),
+      volume: slice(compactSeries(volume), 100),
+      timestamp: slice(timestamps || [], 100),
     },
   };
 }
 
-async function fetchSymbolIndicators(symbol) {
+async function fetchFinnhubSymbolIndicators(symbol) {
   const apiKey = process.env.FINNHUB_API_KEY;
   if (!apiKey) throw new Error('FINNHUB_API_KEY not configured');
 
@@ -238,9 +245,11 @@ async function fetchSymbolIndicators(symbol) {
     timeout: 12000,
   });
 
-  if (response.data?.s !== 'ok') throw new Error(`No candle data for ${symbol}`);
+  if (response.data?.s !== 'ok') throw new Error(`No Finnhub candle data for ${symbol}: ${response.data?.s || 'unknown'}`);
   const { c, h, l, o, v, t } = response.data;
   const indicators = calculateIndicators(c, h, l, o, v, t);
+
+  if (!indicators.lastPrice) throw new Error(`Empty Finnhub price for ${symbol}`);
 
   return {
     symbol,
@@ -250,6 +259,65 @@ async function fetchSymbolIndicators(symbol) {
   };
 }
 
+function yahooSymbolVariants(symbol) {
+  const clean = String(symbol || '').trim().toUpperCase();
+  const withoutSuffix = clean.replace(/\.SA$/i, '');
+  return [...new Set([clean, `${withoutSuffix}.SA`, withoutSuffix].filter(Boolean))];
+}
+
+async function fetchYahooSymbolIndicators(symbol) {
+  const variants = yahooSymbolVariants(symbol);
+  const errors = [];
+
+  for (const variant of variants) {
+    try {
+      const response = await axios.get(`${YAHOO_CHART_BASE}/${encodeURIComponent(variant)}`, {
+        params: { range: '1y', interval: '1d' },
+        timeout: 12000,
+      });
+
+      const result = response.data?.chart?.result?.[0];
+      const quote = result?.indicators?.quote?.[0];
+      const timestamps = result?.timestamp || [];
+
+      if (!quote || !Array.isArray(quote.close)) throw new Error(`Empty Yahoo chart for ${variant}`);
+
+      const indicators = calculateIndicators(quote.close, quote.high, quote.low, quote.open, quote.volume, timestamps);
+      if (!indicators.lastPrice) throw new Error(`Empty Yahoo price for ${variant}`);
+
+      return {
+        symbol,
+        provider: 'yahoo',
+        providerSymbol: variant,
+        fetchedAt: new Date().toISOString(),
+        ...indicators,
+      };
+    } catch (error) {
+      errors.push(`${variant}: ${error.message}`);
+    }
+  }
+
+  throw new Error(errors.join(' | ') || `No Yahoo data for ${symbol}`);
+}
+
+async function fetchSymbolIndicators(symbol) {
+  const errors = [];
+
+  try {
+    return await fetchFinnhubSymbolIndicators(symbol);
+  } catch (error) {
+    errors.push(`finnhub: ${error.message}`);
+  }
+
+  try {
+    return await fetchYahooSymbolIndicators(symbol);
+  } catch (error) {
+    errors.push(`yahoo: ${error.message}`);
+  }
+
+  throw new Error(errors.join(' || '));
+}
+
 async function refreshIndicators(symbols = DEFAULT_SYMBOLS) {
   const startedAt = Date.now();
   try {
@@ -257,6 +325,10 @@ async function refreshIndicators(symbols = DEFAULT_SYMBOLS) {
     const snapshots = batches
       .filter((result) => result.status === 'fulfilled')
       .map((result) => result.value);
+    const failures = batches
+      .map((result, index) => ({ result, symbol: symbols[index] }))
+      .filter(({ result }) => result.status === 'rejected')
+      .map(({ result, symbol }) => ({ symbol, error: result.reason?.message || String(result.reason) }));
 
     snapshots.forEach((snapshot) => {
       runtimeCache.indicators[snapshot.symbol] = snapshot;
@@ -286,19 +358,23 @@ async function refreshIndicators(symbols = DEFAULT_SYMBOLS) {
         updateDbStatus('indicators', false, { error: error.message });
       } else {
         persisted = true;
-        updateDbStatus('indicators', true, { writeCount: rows.length });
+        updateDbStatus('indicators', true, { writeCount: rows.length, failures });
       }
+    } else if (failures.length > 0) {
+      updateDbStatus('indicators', false, { error: 'No indicator snapshots generated', failures });
     }
 
-    await recordRefreshRun('indicators', persistError ? 'partial' : 'success', {
+    await recordRefreshRun(failures.length === symbols.length ? 'indicators' : 'indicators', persistError ? 'partial' : 'success', {
       count: snapshots.length,
       persisted,
       persistError,
+      providers: [...new Set(snapshots.map((item) => item.provider))],
+      failures,
       durationMs: Date.now() - startedAt,
       symbols,
     });
 
-    return { ok: true, count: snapshots.length, persisted, persistError, data: snapshots };
+    return { ok: true, count: snapshots.length, persisted, persistError, failures, data: snapshots };
   } catch (error) {
     await recordRefreshRun('indicators', 'error', { message: error.message });
     throw error;
