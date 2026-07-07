@@ -4,19 +4,35 @@ const router = express.Router();
 
 const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
 
+function coinGeckoHeaders() {
+  const apiKey = process.env.COINGECKO_API_KEY;
+  if (!apiKey) return {};
+
+  return {
+    'x-cg-demo-api-key': apiKey,
+    'x-cg-pro-api-key': apiKey,
+  };
+}
+
+function coinGeckoConfig(params = {}) {
+  return {
+    params,
+    headers: coinGeckoHeaders(),
+    timeout: 12000,
+  };
+}
+
 // Lista de criptomoedas populares
 router.get('/list', async (req, res) => {
   try {
-    const response = await axios.get(`${COINGECKO_BASE}/coins/markets`, {
-      params: {
-        vs_currency: 'usd',
-        order: 'market_cap_desc',
-        per_page: 50,
-        page: 1,
-        sparkline: false,
-        price_change_percentage: '24h,7d,30d'
-      }
-    });
+    const response = await axios.get(`${COINGECKO_BASE}/coins/markets`, coinGeckoConfig({
+      vs_currency: 'usd',
+      order: 'market_cap_desc',
+      per_page: 50,
+      page: 1,
+      sparkline: false,
+      price_change_percentage: '24h,7d,30d'
+    }));
 
     const cryptos = response.data.map(coin => ({
       id: coin.id,
@@ -31,7 +47,9 @@ router.get('/list', async (req, res) => {
       image: coin.image,
       high24h: coin.high_24h,
       low24h: coin.low_24h,
-      rank: coin.market_cap_rank
+      rank: coin.market_cap_rank,
+      source: 'coingecko',
+      updatedAt: new Date().toISOString()
     }));
 
     res.json(cryptos);
@@ -47,15 +65,13 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const response = await axios.get(`${COINGECKO_BASE}/coins/${id}`, {
-      params: {
-        localization: false,
-        tickers: false,
-        market_data: true,
-        community_data: false,
-        developer_data: false
-      }
-    });
+    const response = await axios.get(`${COINGECKO_BASE}/coins/${id}`, coinGeckoConfig({
+      localization: false,
+      tickers: false,
+      market_data: true,
+      community_data: false,
+      developer_data: false
+    }));
 
     const data = response.data;
 
@@ -76,7 +92,9 @@ router.get('/:id', async (req, res) => {
       totalSupply: data.market_data.total_supply,
       maxSupply: data.market_data.max_supply,
       image: data.image?.large,
-      rank: data.market_cap_rank
+      rank: data.market_cap_rank,
+      source: 'coingecko',
+      updatedAt: new Date().toISOString()
     });
 
   } catch (error) {
@@ -91,17 +109,17 @@ router.get('/:id/history', async (req, res) => {
     const { id } = req.params;
     const { days = 30 } = req.query;
 
-    const response = await axios.get(`${COINGECKO_BASE}/coins/${id}/market_chart`, {
-      params: {
-        vs_currency: 'usd',
-        days: parseInt(days)
-      }
-    });
+    const response = await axios.get(`${COINGECKO_BASE}/coins/${id}/market_chart`, coinGeckoConfig({
+      vs_currency: 'usd',
+      days: parseInt(days)
+    }));
 
     res.json({
       prices: response.data.prices,
       market_caps: response.data.market_caps,
-      volumes: response.data.total_volumes
+      volumes: response.data.total_volumes,
+      source: 'coingecko',
+      updatedAt: new Date().toISOString()
     });
 
   } catch (error) {
