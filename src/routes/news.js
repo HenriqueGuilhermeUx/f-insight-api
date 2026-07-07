@@ -1,51 +1,37 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
+const {
+  getCachedNews,
+  normalizeFinnhubNews,
+  refreshNews,
+} = require('../services/liveDataService');
 
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
 
-// Notícias gerais de mercado
+// Notícias gerais de mercado no formato esperado pelo frontend.
 router.get('/', async (req, res) => {
   try {
-    const { category = 'general' } = req.query;
-    const apiKey = process.env.FINNHUB_API_KEY;
+    const { category = 'all', refresh = 'false' } = req.query;
 
-    if (!apiKey) {
-      return res.status(500).json({ error: 'Finnhub API key not configured' });
+    if (refresh === 'true') {
+      await refreshNews();
     }
 
-    const categoryMap = {
-      'general': 'general',
-      'forex': 'forex',
-      'crypto': 'crypto',
-      'merger': 'merger',
-      'tech': 'technology'
-    };
+    const cached = await getCachedNews(20, category);
+    if (cached.length > 0) {
+      return res.json(cached);
+    }
 
-    const response = await axios.get(
-      `${FINNHUB_BASE}/news?category=${categoryMap[category] || 'general'}&token=${apiKey}`
-    );
-
-    const news = response.data.slice(0, 20).map(item => ({
-      id: item.id,
-      category: item.category,
-      datetime: item.datetime,
-      headline: item.headline,
-      image: item.image,
-      source: item.source,
-      summary: item.summary,
-      url: item.url
-    }));
-
-    res.json(news);
-
+    const refreshed = await refreshNews();
+    return res.json(refreshed.data.slice(0, 20));
   } catch (error) {
     console.error('Error fetching news:', error.message);
     res.status(500).json({ error: 'Failed to fetch news' });
   }
 });
 
-// Notícias de uma ação específica
+// Notícias de uma ação específica.
 router.get('/stock/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
@@ -55,40 +41,50 @@ router.get('/stock/:symbol', async (req, res) => {
       return res.status(500).json({ error: 'Finnhub API key not configured' });
     }
 
-    const response = await axios.get(
-      `${FINNHUB_BASE}/company-news?symbol=${symbol}&from=&to=&token=${apiKey}`
-    );
+    const today = new Date();
+    const from = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const to = today.toISOString().slice(0, 10);
 
-    const news = response.data.slice(0, 10).map(item => ({
-      id: item.id,
-      datetime: item.datetime,
-      headline: item.headline,
-      image: item.image,
-      source: item.source,
-      summary: item.summary,
-      url: item.url
-    }));
+    const response = await axios.get(`${FINNHUB_BASE}/company-news`, {
+      params: { symbol, from, to, token: apiKey },
+      timeout: 12000,
+    });
+
+    const news = Array.isArray(response.data)
+      ? response.data.slice(0, 10).map((item) => normalizeFinnhubNews(item, symbol.toLowerCase()))
+      : [];
 
     res.json(news);
-
   } catch (error) {
     console.error('Error fetching stock news:', error.message);
     res.status(500).json({ error: 'Failed to fetch news' });
   }
 });
 
-// Análise de sentimento (simulada)
+// Análise de sentimento simples com base em notícias recentes.
 router.get('/sentiment/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
+    const news = await getCachedNews(30, 'all');
+    const related = news.filter((item) => {
+      const text = `${item.title} ${item.summary} ${(item.tags || []).join(' ')}`.toLowerCase();
+      return text.includes(symbol.toLowerCase().replace('.sa', ''));
+    });
+
+    const positiveCount = related.filter((item) => item.sentiment === 'positive').length;
+    const negativeCount = related.filter((item) => item.sentiment === 'negative').length;
+    const neutralCount = Math.max(related.length - positiveCount - negativeCount, 0);
+    const score = positiveCount - negativeCount;
+    const sentiment = score > 0 ? 'positive' : score < 0 ? 'negative' : 'neutral';
+
     res.json({
       symbol,
-      sentiment: 'neutral',
-      score: 0,
-      positiveCount: 0,
-      negativeCount: 0,
-      neutralCount: 0,
-      lastUpdated: new Date().toISOString()
+      sentiment,
+      score,
+      positiveCount,
+      negativeCount,
+      neutralCount,
+      lastUpdated: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Error analyzing sentiment:', error.message);
