@@ -20,13 +20,43 @@ const { isSupabaseEnabled } = require('./services/supabaseClient');
 
 const app = express();
 
+function buildAllowedOrigins() {
+  const configured = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean)
+    : [];
+
+  return [
+    ...configured,
+    'https://f-insight.netlify.app',
+    'https://finsight.netlify.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+  ];
+}
+
+const allowedOrigins = buildAllowedOrigins();
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (/^https:\/\/[a-z0-9-]+--f-insight\.netlify\.app$/i.test(origin)) return true;
+  if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(origin)) return true;
+  return false;
+}
+
 // Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*'
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked origin: ${origin}`));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+app.options('*', cors());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '8mb' }));
 
@@ -48,8 +78,12 @@ app.get('/', (req, res) => {
   res.json({
     name: 'F-Insight API',
     status: 'ok',
-    version: '1.2.0',
+    version: '1.2.1',
     supabase: isSupabaseEnabled(),
+    cors: {
+      netlifyAllowed: true,
+      configuredOrigins: allowedOrigins,
+    },
     modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache']
   });
 });
@@ -58,8 +92,9 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.2.0',
-    supabase: isSupabaseEnabled()
+    version: '1.2.1',
+    supabase: isSupabaseEnabled(),
+    cors: 'netlify-enabled'
   });
 });
 
@@ -67,15 +102,16 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.2.0',
-    supabase: isSupabaseEnabled()
+    version: '1.2.1',
+    supabase: isSupabaseEnabled(),
+    cors: 'netlify-enabled'
   });
 });
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+  console.error(err.stack || err.message);
+  res.status(500).json({ error: 'Something went wrong!', message: err.message });
 });
 
 const PORT = process.env.PORT || 3000;
