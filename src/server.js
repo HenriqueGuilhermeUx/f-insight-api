@@ -15,6 +15,7 @@ const allocationSignalRoutes = require('./routes/allocationSignals');
 const brandingRoutes = require('./routes/branding');
 const reportRoutes = require('./routes/reports');
 const liveRoutes = require('./routes/live');
+const billingRoutes = require('./routes/billing');
 const { startCronJobs } = require('./services/cronService');
 const { isSupabaseEnabled } = require('./services/supabaseClient');
 
@@ -44,19 +45,21 @@ function isAllowedOrigin(origin) {
   return false;
 }
 
-// Middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' }
-}));
-app.use(cors({
+const corsOptions = {
   origin(origin, callback) {
     if (isAllowedOrigin(origin)) return callback(null, true);
     return callback(new Error(`CORS blocked origin: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+// Middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
-app.options('*', cors());
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(morgan('combined'));
 app.use(express.json({ limit: '8mb' }));
 
@@ -72,19 +75,20 @@ app.use('/api/signals', allocationSignalRoutes);
 app.use('/api/tenants', brandingRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/live', liveRoutes);
+app.use('/api/billing', billingRoutes);
 
 // Health checks
 app.get('/', (req, res) => {
   res.json({
     name: 'F-Insight API',
     status: 'ok',
-    version: '1.2.1',
+    version: '1.3.0',
     supabase: isSupabaseEnabled(),
     cors: {
       netlifyAllowed: true,
       configuredOrigins: allowedOrigins,
     },
-    modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache']
+    modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing']
   });
 });
 
@@ -92,7 +96,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.2.1',
+    version: '1.3.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled'
   });
@@ -102,7 +106,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.2.1',
+    version: '1.3.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled'
   });
