@@ -6,18 +6,20 @@ const BCB_SERIES = {
   usdBrl: { code: 1, label: 'Dólar Comercial', unit: 'BRL' }
 };
 
+const CACHE_TTL_MS = 30 * 60 * 1000;
+
 const fallbackMacro = {
   updatedAt: new Date().toISOString(),
-  source: 'fallback',
+  source: 'fallback-offline',
   indicators: [
     {
       id: 'selic',
       label: 'Selic Meta',
-      value: 10.5,
+      value: 14.0,
       unit: '% a.a.',
       date: new Date().toISOString().slice(0, 10),
-      trend: 'neutral',
-      interpretation: 'Juros ainda em patamar relevante para valuation e renda fixa.'
+      trend: 'up',
+      interpretation: 'Fallback offline. A leitura online deve vir da série 432 do Banco Central.'
     },
     {
       id: 'ipca',
@@ -26,16 +28,16 @@ const fallbackMacro = {
       unit: '% m/m',
       date: new Date().toISOString().slice(0, 10),
       trend: 'neutral',
-      interpretation: 'Inflação em observação; impacto direto na curva de juros.'
+      interpretation: 'Inflação impacta juros futuros, margens corporativas e poder de compra.'
     },
     {
       id: 'usdbrl',
       label: 'Dólar Comercial',
-      value: 5.2,
+      value: 5.1,
       unit: 'BRL',
       date: new Date().toISOString().slice(0, 10),
       trend: 'neutral',
-      interpretation: 'Câmbio influencia commodities, empresas exportadoras e inflação.'
+      interpretation: 'Câmbio afeta inflação, commodities, exportadoras e empresas com dívida em dólar.'
     }
   ],
   signals: []
@@ -45,6 +47,8 @@ let macroCache = {
   ...fallbackMacro,
   signals: buildSignals(fallbackMacro.indicators)
 };
+let lastRefreshAt = 0;
+let inFlightRefresh = null;
 
 function parseBcbValue(raw) {
   if (raw === undefined || raw === null) return null;
@@ -56,7 +60,13 @@ function parseBcbValue(raw) {
 async function fetchBcbLastValue(seriesKey) {
   const series = BCB_SERIES[seriesKey];
   const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${series.code}/dados/ultimos/1?formato=json`;
-  const response = await axios.get(url, { timeout: 10000 });
+  const response = await axios.get(url, {
+    timeout: 10000,
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'F-Insight/1.0 (+https://f-insight.netlify.app)'
+    }
+  });
   const item = Array.isArray(response.data) ? response.data[0] : null;
 
   if (!item) {
@@ -72,7 +82,8 @@ async function fetchBcbLastValue(seriesKey) {
     value,
     date: item.data,
     label: series.label,
-    unit: series.unit
+    unit: series.unit,
+    source: `BCB SGS ${series.code}`
   };
 }
 
@@ -113,9 +124,9 @@ function buildSignals(indicators) {
       impact: 'moderado',
       status: 'ativo',
       tickers: ['PETR4', 'VALE3', 'ITUB4', 'BBAS3', 'TAEE4'],
-      summary: 'Com a Selic em patamar elevado, ativos com geração de caixa, dividendos e valuation descontado ganham prioridade no radar.',
+      summary: `Com a Selic em ${selic.value.toFixed(2).replace('.', ',')}% a.a., ativos com geração de caixa, dividendos e valuation descontado ganham prioridade no radar.`,
       rationale: 'Juros altos elevam a taxa de desconto dos fluxos futuros. Empresas lucrativas, com caixa e múltiplos menores tendem a sofrer menos compressão de valuation.',
-      suggestedAction: 'Priorizar relatórios de Graham Score, dividend yield e margem de segurança antes de aumentar exposição a crescimento.',
+      suggestedAction: 'Usar Graham Score, dividend yield, qualidade e margem de segurança como filtros educativos antes de aumentar exposição.',
       generatedAt: now
     });
   }
@@ -130,7 +141,7 @@ function buildSignals(indicators) {
       tickers: ['ABEV3', 'WEGE3', 'EQTL3', 'PETR4'],
       summary: 'Inflação mensal acima do conforto exige atenção a empresas com capacidade de repassar preços e proteger margens.',
       rationale: 'Inflação persistente pode pressionar custos e reduzir margem de empresas sem poder de preço.',
-      suggestedAction: 'Gerar relatórios para setores regulados, exportadoras e empresas com margem operacional resiliente.',
+      suggestedAction: 'Comparar setores regulados, exportadoras e empresas com margem operacional resiliente.',
       generatedAt: now
     });
   }
@@ -145,7 +156,7 @@ function buildSignals(indicators) {
       tickers: ['VALE3', 'PETR4', 'SUZB3', 'JBSS3'],
       summary: 'Dólar mais forte tende a beneficiar empresas com receita dolarizada, embora também pressione custos e inflação.',
       rationale: 'Receitas em dólar podem elevar geração de caixa em reais para companhias exportadoras.',
-      suggestedAction: 'Comparar exposição cambial, dívida em dólar e margem de segurança antes da recomendação.',
+      suggestedAction: 'Comparar exposição cambial, dívida em dólar e margem de segurança antes de concluir assimetria.',
       generatedAt: now
     });
   }
@@ -159,8 +170,8 @@ function buildSignals(indicators) {
       status: 'monitorando',
       tickers: ['PETR4', 'VALE3', 'ITUB4', 'WEGE3'],
       summary: 'Sem gatilho macro extremo no momento. O foco deve permanecer em valuation, qualidade e assimetria.',
-      rationale: 'Quando juros, inflação e câmbio não geram sinal forte, a seleção bottom-up ganha peso na tomada de decisão.',
-      suggestedAction: 'Usar Graham Score e DCF como filtros principais antes de emitir relatórios para clientes.',
+      rationale: 'Quando juros, inflação e câmbio não geram sinal forte, a seleção bottom-up ganha peso no estudo dos ativos.',
+      suggestedAction: 'Usar Graham Score e screener fundamentalista como filtros principais.',
       generatedAt: now
     });
   }
@@ -180,48 +191,71 @@ async function refreshMacroData() {
   const ipcaData = ipcaResult.status === 'fulfilled' ? ipcaResult.value : null;
   const usdData = usdResult.status === 'fulfilled' ? usdResult.value : null;
 
+  const selicFallback = getIndicator(fallbackIndicators, 'selic');
+  const ipcaFallback = getIndicator(fallbackIndicators, 'ipca');
+  const usdFallback = getIndicator(fallbackIndicators, 'usdbrl');
+
   const indicators = [
     {
       id: 'selic',
       label: 'Selic Meta',
-      value: selicData?.value ?? getIndicator(fallbackIndicators, 'selic').value,
+      value: selicData?.value ?? selicFallback.value,
       unit: '% a.a.',
-      date: selicData?.date ?? getIndicator(fallbackIndicators, 'selic').date,
-      trend: classifySelic(selicData?.value ?? getIndicator(fallbackIndicators, 'selic').value),
+      date: selicData?.date ?? selicFallback.date,
+      source: selicData?.source ?? 'fallback-offline',
+      trend: classifySelic(selicData?.value ?? selicFallback.value),
       interpretation: 'Principal referência para taxa de desconto, renda fixa e múltiplos de ações.'
     },
     {
       id: 'ipca',
       label: 'IPCA Mensal',
-      value: ipcaData?.value ?? getIndicator(fallbackIndicators, 'ipca').value,
+      value: ipcaData?.value ?? ipcaFallback.value,
       unit: '% m/m',
-      date: ipcaData?.date ?? getIndicator(fallbackIndicators, 'ipca').date,
-      trend: classifyIpca(ipcaData?.value ?? getIndicator(fallbackIndicators, 'ipca').value),
+      date: ipcaData?.date ?? ipcaFallback.date,
+      source: ipcaData?.source ?? 'fallback-offline',
+      trend: classifyIpca(ipcaData?.value ?? ipcaFallback.value),
       interpretation: 'Inflação impacta juros futuros, margens corporativas e poder de compra.'
     },
     {
       id: 'usdbrl',
       label: 'Dólar Comercial',
-      value: usdData?.value ?? getIndicator(fallbackIndicators, 'usdbrl').value,
+      value: usdData?.value ?? usdFallback.value,
       unit: 'BRL',
-      date: usdData?.date ?? getIndicator(fallbackIndicators, 'usdbrl').date,
-      trend: classifyUsd(usdData?.value ?? getIndicator(fallbackIndicators, 'usdbrl').value),
+      date: usdData?.date ?? usdFallback.date,
+      source: usdData?.source ?? 'fallback-offline',
+      trend: classifyUsd(usdData?.value ?? usdFallback.value),
       interpretation: 'Câmbio afeta inflação, commodities, exportadoras e empresas com dívida em dólar.'
     }
   ];
 
   macroCache = {
     updatedAt: new Date().toISOString(),
-    source: selicData || ipcaData || usdData ? 'banco-central-sgs' : 'fallback',
+    source: selicData || ipcaData || usdData ? 'banco-central-sgs-online' : 'fallback-offline',
+    cacheTtlMinutes: CACHE_TTL_MS / 60000,
     indicators,
     signals: buildSignals(indicators)
   };
+  lastRefreshAt = Date.now();
 
   return macroCache;
 }
 
-function getMacroData() {
-  return macroCache;
+async function getMacroData({ force = false } = {}) {
+  const isFresh = Date.now() - lastRefreshAt < CACHE_TTL_MS;
+  if (!force && isFresh) return macroCache;
+
+  if (!inFlightRefresh) {
+    inFlightRefresh = refreshMacroData().finally(() => {
+      inFlightRefresh = null;
+    });
+  }
+
+  try {
+    return await inFlightRefresh;
+  } catch (error) {
+    console.error('Macro refresh failed:', error.message);
+    return macroCache;
+  }
 }
 
 function getActiveSignals() {
@@ -230,9 +264,13 @@ function getActiveSignals() {
 
 setInterval(() => {
   refreshMacroData().catch((error) => {
-    console.error('Macro refresh failed:', error.message);
+    console.error('Macro scheduled refresh failed:', error.message);
   });
 }, 6 * 60 * 60 * 1000);
+
+refreshMacroData().catch((error) => {
+  console.error('Initial macro refresh failed:', error.message);
+});
 
 module.exports = {
   refreshMacroData,
