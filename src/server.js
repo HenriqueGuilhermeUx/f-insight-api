@@ -17,6 +17,7 @@ const reportRoutes = require('./routes/reports');
 const liveRoutes = require('./routes/live');
 const billingRoutes = require('./routes/billing');
 const automationRoutes = require('./routes/automation');
+const finsightAgentRoutes = require('./routes/finsightAgent');
 const { startCronJobs } = require('./services/cronService');
 const { isSupabaseEnabled } = require('./services/supabaseClient');
 
@@ -78,19 +79,20 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/live', liveRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/automation', automationRoutes);
+app.use('/api/agent', finsightAgentRoutes);
 
 // Health checks
 app.get('/', (req, res) => {
   res.json({
     name: 'F-Insight API',
     status: 'ok',
-    version: '1.4.0',
+    version: '1.5.0',
     supabase: isSupabaseEnabled(),
     cors: {
       netlifyAllowed: true,
       configuredOrigins: allowedOrigins,
     },
-    modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing', 'automation-bridge']
+    modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing', 'automation-bridge', 'finsight-agent']
   });
 });
 
@@ -98,9 +100,10 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.4.0',
+    version: '1.5.0',
     supabase: isSupabaseEnabled(),
-    cors: 'netlify-enabled'
+    cors: 'netlify-enabled',
+    agent: 'enabled'
   });
 });
 
@@ -108,9 +111,10 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.4.0',
+    version: '1.5.0',
     supabase: isSupabaseEnabled(),
-    cors: 'netlify-enabled'
+    cors: 'netlify-enabled',
+    agent: 'enabled'
   });
 });
 
