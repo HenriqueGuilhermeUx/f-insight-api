@@ -1,0 +1,37 @@
+name: Internal Market Terminal CI
+
+on:
+  push:
+    branches:
+      - feature/quant-market-terminal-internal
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Quant engine test
+        run: npm run test:quant
+
+      - name: Market terminal deterministic test
+        run: npm run test:market-terminal
+
+      - name: Market terminal live public-data test
+        env:
+          TEST_SYMBOL: PETR4.SA
+        run: npm run test:market-terminal:live
