@@ -3,7 +3,9 @@ name: Persistent User Preferences CI
 on:
   push:
     branches:
+      - main
       - feature/persistent-watchlist-alerts
+      - feature/preferences-storage-health
   workflow_dispatch:
 
 permissions:
@@ -48,6 +50,8 @@ jobs:
             if curl -fsS http://127.0.0.1:3213/health >/dev/null; then break; fi
             sleep 1
           done
+
+          curl -fsS http://127.0.0.1:3213/api/watchlist/_health/storage | grep -q '"service":"user-market-preferences"'
 
           curl -fsS -H 'Content-Type: application/json' \
             -d '{"ticker":"petr4","name":"Petrobras","type":"stock"}' \
