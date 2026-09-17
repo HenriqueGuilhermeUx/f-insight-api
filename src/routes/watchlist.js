@@ -2,6 +2,16 @@ const express = require('express');
 const router = express.Router();
 const store = require('../services/userMarketPreferencesStore');
 
+router.get('/_health/storage', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'user-market-preferences',
+    storageMode: store.storageMode(),
+    watchlistTable: store.WATCHLIST_TABLE,
+    alertsTable: store.ALERTS_TABLE,
+  });
+});
+
 router.get('/:userId', async (req, res) => {
   try {
     const watchlist = await store.getWatchlist(req.params.userId);
