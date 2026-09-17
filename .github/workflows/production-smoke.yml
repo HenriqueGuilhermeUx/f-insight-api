@@ -1,0 +1,61 @@
+name: Production Smoke
+
+on:
+  push:
+    branches:
+      - main
+      - ci/production-smoke
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Render deployment and verify public API
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE="https://f-insight-api.onrender.com"
+
+          request_until_ok() {
+            local path="$1"
+            local output="$2"
+            for attempt in {1..24}; do
+              code=$(curl --silent --show-error --max-time 25 -o "$output" -w "%{http_code}" "$BASE$path" || true)
+              if [ "$code" = "200" ]; then
+                return 0
+              fi
+              echo "attempt $attempt: $path returned $code"
+              sleep 5
+            done
+            echo "Timed out waiting for $path"
+            cat "$output" || true
+            return 1
+          }
+
+          request_until_ok "/health" /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+
+          request_until_ok "/api/agent/health" /tmp/agent.json
+          grep -q 'finsight-agent' /tmp/agent.json
+
+          request_until_ok "/api/watchlist/_health/storage" /tmp/storage.json
+          grep -q '"service":"user-market-preferences"' /tmp/storage.json
+
+          request_until_ok "/api/live/indicators" /tmp/indicators.json
+          node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('/tmp/indicators.json')); if (!Array.isArray(j.data) || j.data.length < 1) { console.error(j); process.exit(1) } console.log('indicator source:', j.source, 'count:', j.data.length)"
+
+          request_until_ok "/api/news" /tmp/news.json
+          node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('/tmp/news.json')); if (!Array.isArray(j)) { console.error(j); process.exit(1) } console.log('news count:', j.length)"
+
+      - name: Verify production custom-domain CORS
+        shell: bash
+        run: |
+          set -euo pipefail
+          headers=$(curl --silent --show-error --max-time 25 -D - -o /dev/null -H "Origin: https://f-insight.org" https://f-insight-api.onrender.com/health)
+          echo "$headers"
+          echo "$headers" | tr -d '\r' | grep -qi '^access-control-allow-origin: https://f-insight.org$'
