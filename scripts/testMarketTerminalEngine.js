@@ -3,6 +3,8 @@
 const marketTerminal = require('../src/services/marketTerminalEngine');
 const sentiment = require('../src/services/marketTerminal/sentimentEngine');
 const analytics = require('../src/services/marketTerminal/marketAnalytics');
+const optionsAnalytics = require('../src/services/marketTerminal/optionsAnalytics');
+const strategyEngine = require('../src/services/marketTerminal/strategyEngine');
 const { parseOptionChainCsv } = require('../src/services/marketTerminal/optionChainCsv');
 const quantLab = require('../src/services/quantLabEngine');
 
@@ -54,6 +56,36 @@ async function main() {
   assert(scan.count === 2, 'quant scan should analyze two options');
   assert(scan.top.every((item) => Number.isFinite(item.score)), 'quant scores should be finite');
 
+  const optionRisk = optionsAnalytics.analyzeLongOption({
+    symbol: 'PETR4C450',
+    type: 'call',
+    spot: 42.10,
+    strike: 45,
+    premium: 1.20,
+    daysToExpiry: 90,
+    riskFreeRate: 0.12,
+    annualVolatility: historyAnalytics.volatility.hv60,
+    annualDrift: historyAnalytics.annualizedDrift,
+    simulations: 5000,
+  });
+  assert(Number.isFinite(optionRisk.greeks.delta), 'delta should be finite');
+  assert(optionRisk.model.probabilityOfProfit >= 0 && optionRisk.model.probabilityOfProfit <= 1, 'probability of profit should be bounded');
+
+  const strategy = strategyEngine.analyzeStrategy({
+    symbol: 'PETR4',
+    spot: 42.10,
+    daysToExpiry: 90,
+    annualVolatility: historyAnalytics.volatility.hv60,
+    annualDrift: historyAnalytics.annualizedDrift,
+    simulations: 5000,
+    legs: [
+      { type: 'call', side: 'long', strike: 43, premium: 2.10, quantity: 1 },
+      { type: 'call', side: 'short', strike: 48, premium: 0.85, quantity: 1 },
+    ],
+  });
+  assert(strategy.model.probabilityOfProfit >= 0 && strategy.model.probabilityOfProfit <= 1, 'strategy probability should be bounded');
+  assert(strategy.payoff.grid.length > 100, 'strategy payoff grid should be generated');
+
   const output = {
     ok: true,
     architecture: marketTerminal.architecturePlan(),
@@ -68,6 +100,16 @@ async function main() {
       label: item.label,
       edgePct: Number((item.edge * 100).toFixed(2)),
     })),
+    optionRisk: {
+      breakEven: optionRisk.breakEven,
+      probabilityOfProfit: optionRisk.model.probabilityOfProfit,
+      greeks: optionRisk.greeks,
+    },
+    strategy: {
+      probabilityOfProfit: strategy.model.probabilityOfProfit,
+      expectedPnL: strategy.model.expectedPnL,
+      risk: strategy.risk,
+    },
     notice: marketTerminal.INTERNAL_NOTICE,
   };
 
