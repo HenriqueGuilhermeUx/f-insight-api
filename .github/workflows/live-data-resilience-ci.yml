@@ -1,0 +1,35 @@
+name: Live Data Resilience CI
+
+on:
+  push:
+    branches:
+      - main
+      - feature/live-data-resilience
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax validation
+        run: |
+          node --check src/services/liveDataService.js
+          node --check src/routes/live.js
+          node --check scripts/testLiveDataResilience.js
+
+      - name: Memory fallback test
+        run: npm run test:live-resilience
