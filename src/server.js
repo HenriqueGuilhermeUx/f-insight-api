@@ -18,6 +18,7 @@ const liveRoutes = require('./routes/live');
 const billingRoutes = require('./routes/billing');
 const automationRoutes = require('./routes/automation');
 const finsightAgentRoutes = require('./routes/finsightAgent');
+const internalMarketTerminalRoutes = require('./routes/internalMarketTerminal');
 const { startCronJobs } = require('./services/cronService');
 const { isSupabaseEnabled } = require('./services/supabaseClient');
 
@@ -53,19 +54,15 @@ const corsOptions = {
     return callback(new Error(`CORS blocked origin: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-FInsight-Internal-Key'],
 };
 
-// Middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' }
-}));
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(morgan('combined'));
 app.use(express.json({ limit: '8mb' }));
 
-// Routes
 app.use('/api/stocks', stockRoutes);
 app.use('/api/crypto', cryptoRoutes);
 app.use('/api/news', newsRoutes);
@@ -81,17 +78,19 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/automation', automationRoutes);
 app.use('/api/agent', finsightAgentRoutes);
 
-// Health checks
+const internalMarketTerminalEnabled = process.env.INTERNAL_MARKET_TERMINAL_ENABLED === 'true';
+if (internalMarketTerminalEnabled) {
+  app.use('/api/internal/market-terminal', internalMarketTerminalRoutes);
+}
+
 app.get('/', (req, res) => {
   res.json({
     name: 'F-Insight API',
     status: 'ok',
-    version: '1.5.0',
+    version: '1.6.0',
     supabase: isSupabaseEnabled(),
-    cors: {
-      netlifyAllowed: true,
-      configuredOrigins: allowedOrigins,
-    },
+    cors: { netlifyAllowed: true, configuredOrigins: allowedOrigins },
+    internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
     modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing', 'automation-bridge', 'finsight-agent']
   });
 });
@@ -100,10 +99,11 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.5.0',
+    version: '1.6.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled',
-    agent: 'enabled'
+    agent: 'enabled',
+    internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled'
   });
 });
 
@@ -111,14 +111,14 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.5.0',
+    version: '1.6.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled',
-    agent: 'enabled'
+    agent: 'enabled',
+    internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled'
   });
 });
 
-// Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack || err.message);
   res.status(500).json({ error: 'Something went wrong!', message: err.message });

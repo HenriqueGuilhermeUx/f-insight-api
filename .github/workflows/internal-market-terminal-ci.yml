@@ -1,0 +1,80 @@
+name: Internal Market Terminal CI
+
+on:
+  push:
+    branches:
+      - feature/quant-market-terminal-internal
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax validation
+        run: |
+          node --check src/server.js
+          node --check src/routes/internalMarketTerminal.js
+          node --check src/services/marketTerminalEngine.js
+          node --check src/services/marketTerminal/optionsAnalytics.js
+          node --check src/services/marketTerminal/strategyEngine.js
+
+      - name: Route load validation
+        env:
+          INTERNAL_MARKET_TERMINAL_ENABLED: 'true'
+          FINSIGHT_INTERNAL_API_KEY: ci-test-key
+        run: node -e "require('./src/routes/internalMarketTerminal'); console.log('internal route loads')"
+
+      - name: Quant engine test
+        run: npm run test:quant
+
+      - name: Quant numeric parsing test
+        run: npm run test:quant:numbers
+
+      - name: Market terminal deterministic test
+        run: npm run test:market-terminal
+
+      - name: Authenticated internal API smoke test
+        env:
+          NODE_ENV: production
+          ENABLE_CRON: 'false'
+          INTERNAL_MARKET_TERMINAL_ENABLED: 'true'
+          FINSIGHT_INTERNAL_API_KEY: ci-test-key
+          PORT: '3210'
+        run: |
+          set -euo pipefail
+          node src/server.js >/tmp/finsight-internal.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true; cat /tmp/finsight-internal.log || true' EXIT
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:3210/health >/tmp/health.json; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3210/health | grep -q 'enabled-guarded'
+          UNAUTH_CODE=$(curl -s -o /tmp/unauth.json -w '%{http_code}' http://127.0.0.1:3210/api/internal/market-terminal/health)
+          test "$UNAUTH_CODE" = '401'
+          curl -fsS -H 'X-FInsight-Internal-Key: ci-test-key' http://127.0.0.1:3210/api/internal/market-terminal/health | grep -q 'internal-only'
+          curl -fsS -H 'X-FInsight-Internal-Key: ci-test-key' -H 'Content-Type: application/json' \
+            -d '{"symbol":"PETR4C450","type":"call","spot":42.1,"strike":45,"premium":1.2,"daysToExpiry":90,"annualVolatility":0.34,"annualDrift":0.08,"riskFreeRate":0.12,"simulations":2000}' \
+            http://127.0.0.1:3210/api/internal/market-terminal/quant/option-risk | grep -q 'probabilityOfProfit'
+          curl -fsS -H 'X-FInsight-Internal-Key: ci-test-key' -H 'Content-Type: application/json' \
+            -d '{"symbol":"PETR4","spot":42.1,"daysToExpiry":90,"annualVolatility":0.34,"annualDrift":0.08,"simulations":2000,"legs":[{"type":"call","side":"long","strike":43,"premium":2.1},{"type":"call","side":"short","strike":48,"premium":0.85}]}' \
+            http://127.0.0.1:3210/api/internal/market-terminal/quant/strategy | grep -q 'probabilityOfProfit'
+
+      - name: Market terminal live public-data test
+        env:
+          TEST_SYMBOL: PETR4.SA
+        run: npm run test:market-terminal:live
