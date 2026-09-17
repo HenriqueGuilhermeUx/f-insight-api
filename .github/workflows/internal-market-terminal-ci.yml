@@ -24,6 +24,20 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Syntax validation
+        run: |
+          node --check src/server.js
+          node --check src/routes/internalMarketTerminal.js
+          node --check src/services/marketTerminalEngine.js
+          node --check src/services/marketTerminal/optionsAnalytics.js
+          node --check src/services/marketTerminal/strategyEngine.js
+
+      - name: Route load validation
+        env:
+          INTERNAL_MARKET_TERMINAL_ENABLED: 'true'
+          FINSIGHT_INTERNAL_API_KEY: ci-test-key
+        run: node -e "require('./src/routes/internalMarketTerminal'); console.log('internal route loads')"
+
       - name: Quant engine test
         run: npm run test:quant
 
