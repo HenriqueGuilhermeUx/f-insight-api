@@ -78,55 +78,66 @@ function updateDbStatus(key, ok, detail = {}) {
 async function recordRefreshRun(kind, status, metadata = {}) {
   if (!isSupabaseEnabled()) return { ok: false, skipped: true, reason: 'supabase-disabled' };
 
-  const { error } = await supabase.from('market_refresh_runs').insert({
-    kind,
-    status,
-    metadata,
-    ran_at: new Date().toISOString(),
-  });
+  try {
+    const { error } = await supabase.from('market_refresh_runs').insert({
+      kind,
+      status,
+      metadata,
+      ran_at: new Date().toISOString(),
+    });
 
-  if (error) {
-    updateDbStatus('refreshRuns', false, { error: error.message });
-    console.warn('Failed to record refresh run:', error.message);
-    return { ok: false, error: error.message };
+    if (error) throw error;
+
+    updateDbStatus('refreshRuns', true);
+    return { ok: true };
+  } catch (error) {
+    const message = error?.message || String(error);
+    updateDbStatus('refreshRuns', false, { error: message });
+    console.warn('Failed to record refresh run:', message);
+    return { ok: false, error: message };
   }
-
-  updateDbStatus('refreshRuns', true);
-  return { ok: true };
 }
 
 async function getCachedNews(limit = 20, category = 'all') {
   if (isSupabaseEnabled()) {
-    let query = supabase
-      .from('market_news')
-      .select('provider_id,title,summary,source,url,image_url,published_at,tags,sentiment,category')
-      .order('published_at', { ascending: false })
-      .limit(limit);
+    try {
+      let query = supabase
+        .from('market_news')
+        .select('provider_id,title,summary,source,url,image_url,published_at,tags,sentiment,category')
+        .order('published_at', { ascending: false })
+        .limit(limit);
 
-    if (category && category !== 'all') {
-      query = query.eq('category', category);
+      if (category && category !== 'all') {
+        query = query.eq('category', category);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      if (Array.isArray(data) && data.length > 0) {
+        updateDbStatus('news', true, { readCount: data.length });
+        return data.map((item) => ({
+          id: item.provider_id,
+          title: item.title,
+          summary: item.summary,
+          source: item.source,
+          url: item.url,
+          image: item.image_url,
+          publishedAt: item.published_at,
+          tags: item.tags || [item.category].filter(Boolean),
+          sentiment: item.sentiment || 'neutral',
+        }));
+      }
+    } catch (error) {
+      const message = error?.message || String(error);
+      updateDbStatus('news', false, { error: message });
+      console.warn('Supabase news cache unavailable, using memory cache:', message);
     }
-
-    const { data, error } = await query;
-    if (!error && Array.isArray(data) && data.length > 0) {
-      updateDbStatus('news', true, { readCount: data.length });
-      return data.map((item) => ({
-        id: item.provider_id,
-        title: item.title,
-        summary: item.summary,
-        source: item.source,
-        url: item.url,
-        image: item.image_url,
-        publishedAt: item.published_at,
-        tags: item.tags || [item.category].filter(Boolean),
-        sentiment: item.sentiment || 'neutral',
-      }));
-    }
-
-    if (error) updateDbStatus('news', false, { error: error.message });
   }
 
-  return runtimeCache.news.slice(0, limit);
+  const cached = runtimeCache.news;
+  if (!category || category === 'all') return cached.slice(0, limit);
+  return cached.filter((item) => (item.tags || []).includes(category)).slice(0, limit);
 }
 
 async function fetchFinnhubCategory(category) {
@@ -176,16 +187,18 @@ async function refreshNews(categories = DEFAULT_NEWS_CATEGORIES) {
         raw: item.raw || item,
       }));
 
-      const { error } = await supabase
-        .from('market_news')
-        .upsert(rows, { onConflict: 'provider,provider_id' });
+      try {
+        const { error } = await supabase
+          .from('market_news')
+          .upsert(rows, { onConflict: 'provider,provider_id' });
+        if (error) throw error;
 
-      if (error) {
-        persistError = error.message;
-        updateDbStatus('news', false, { error: error.message });
-      } else {
         persisted = true;
         updateDbStatus('news', true, { writeCount: rows.length });
+      } catch (error) {
+        persistError = error?.message || String(error);
+        updateDbStatus('news', false, { error: persistError });
+        console.warn('Failed to persist news; keeping runtime cache:', persistError);
       }
     }
 
@@ -318,6 +331,18 @@ async function fetchSymbolIndicators(symbol) {
   throw new Error(errors.join(' || '));
 }
 
+function getCachedIndicators(symbols = []) {
+  const requested = Array.isArray(symbols)
+    ? symbols.map((item) => String(item || '').trim().toUpperCase()).filter(Boolean)
+    : [];
+
+  const all = Object.values(runtimeCache.indicators || {});
+  if (requested.length === 0) return all;
+
+  const allowed = new Set(requested);
+  return all.filter((item) => allowed.has(String(item.symbol || '').toUpperCase()));
+}
+
 async function refreshIndicators(symbols = DEFAULT_SYMBOLS) {
   const startedAt = Date.now();
   try {
@@ -349,16 +374,19 @@ async function refreshIndicators(symbols = DEFAULT_SYMBOLS) {
         candles: item.candles,
         fetched_at: item.fetchedAt,
       }));
-      const { error } = await supabase
-        .from('market_indicator_snapshots')
-        .upsert(rows, { onConflict: 'symbol,provider' });
 
-      if (error) {
-        persistError = error.message;
-        updateDbStatus('indicators', false, { error: error.message });
-      } else {
+      try {
+        const { error } = await supabase
+          .from('market_indicator_snapshots')
+          .upsert(rows, { onConflict: 'symbol,provider' });
+        if (error) throw error;
+
         persisted = true;
         updateDbStatus('indicators', true, { writeCount: rows.length, failures });
+      } catch (error) {
+        persistError = error?.message || String(error);
+        updateDbStatus('indicators', false, { error: persistError, failures });
+        console.warn('Failed to persist indicators; keeping runtime cache:', persistError);
       }
     } else if (failures.length > 0) {
       updateDbStatus('indicators', false, { error: 'No indicator snapshots generated', failures });
@@ -391,18 +419,20 @@ async function refreshMacroAndPersist() {
     let persistError = null;
 
     if (isSupabaseEnabled()) {
-      const { error } = await supabase.from('market_macro_snapshots').insert({
-        source: macro.source,
-        payload: macro,
-        fetched_at: macro.updatedAt || new Date().toISOString(),
-      });
+      try {
+        const { error } = await supabase.from('market_macro_snapshots').insert({
+          source: macro.source,
+          payload: macro,
+          fetched_at: macro.updatedAt || new Date().toISOString(),
+        });
+        if (error) throw error;
 
-      if (error) {
-        persistError = error.message;
-        updateDbStatus('macro', false, { error: error.message });
-      } else {
         persisted = true;
         updateDbStatus('macro', true);
+      } catch (error) {
+        persistError = error?.message || String(error);
+        updateDbStatus('macro', false, { error: persistError });
+        console.warn('Failed to persist macro; returning live macro data:', persistError);
       }
     }
 
@@ -480,6 +510,7 @@ module.exports = {
   DEFAULT_NEWS_CATEGORIES,
   DEFAULT_SYMBOLS,
   getCachedNews,
+  getCachedIndicators,
   refreshNews,
   refreshIndicators,
   refreshMacroAndPersist,
