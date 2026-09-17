@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/advisor-intelligence-internal
+      - feature/advisor-market-enrichment
   workflow_dispatch:
 
 permissions:
@@ -29,9 +30,13 @@ jobs:
           node --check src/server.js
           node --check src/routes/internalAdvisorIntelligence.js
           node --check src/services/advisorIntelligenceEngine.js
+          node --check src/services/advisorMarketEnrichment.js
 
       - name: Advisor engine test
         run: npm run test:advisor-intelligence
+
+      - name: Advisor market enrichment deterministic test
+        run: npm run test:advisor-enrichment
 
       - name: Authenticated advisor API smoke test
         env:
@@ -53,10 +58,32 @@ jobs:
           curl -fsS http://127.0.0.1:3211/health | grep -q 'internalAdvisorIntelligence'
           UNAUTH_CODE=$(curl -s -o /tmp/unauth.json -w '%{http_code}' http://127.0.0.1:3211/api/internal/advisor-intelligence/health)
           test "$UNAUTH_CODE" = '401'
-          curl -fsS -H 'X-FInsight-Internal-Key: ci-advisor-key' http://127.0.0.1:3211/api/internal/advisor-intelligence/health | grep -q 'internal-only'
+          curl -fsS -H 'X-FInsight-Internal-Key: ci-advisor-key' http://127.0.0.1:3211/api/internal/advisor-intelligence/health | grep -q 'marketEnrichment'
           curl -fsS -H 'X-FInsight-Internal-Key: ci-advisor-key' -H 'Content-Type: application/json' \
             -d '{"clientId":"c1","holdings":[{"symbol":"PETR4","quantity":1000,"price":42,"assetClass":"stock","sector":"energy","currency":"BRL"},{"symbol":"TESOURO","marketValue":100000,"assetClass":"fixed-income","sector":"sovereign","currency":"BRL"}]}' \
             http://127.0.0.1:3211/api/internal/advisor-intelligence/portfolio/analyze | grep -q 'concentration'
           curl -fsS -H 'X-FInsight-Internal-Key: ci-advisor-key' -H 'Content-Type: application/json' \
             -d '{"clientId":"c1","holdings":[{"symbol":"PETR4","marketValue":50000,"assetClass":"stock","sector":"energy","currency":"BRL"}],"scenario":{"name":"shock","assetClassShocks":{"stock":-0.1}}}' \
             http://127.0.0.1:3211/api/internal/advisor-intelligence/portfolio/stress | grep -q 'stressedValue'
+
+      - name: Live public-data advisor enrichment test
+        env:
+          NODE_ENV: production
+          ENABLE_CRON: 'false'
+          INTERNAL_ADVISOR_INTELLIGENCE_ENABLED: 'true'
+          FINSIGHT_INTERNAL_API_KEY: ci-advisor-key
+          PORT: '3212'
+        run: |
+          set -euo pipefail
+          node src/server.js >/tmp/finsight-advisor-live.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true; cat /tmp/finsight-advisor-live.log || true' EXIT
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:3212/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS -H 'X-FInsight-Internal-Key: ci-advisor-key' -H 'Content-Type: application/json' \
+            -d '{"clientId":"live-test","holdings":[{"symbol":"PETR4.SA","quantity":10,"assetClass":"stock","sector":"energy","currency":"BRL"}]}' \
+            http://127.0.0.1:3212/api/internal/advisor-intelligence/portfolio/live-analyze > /tmp/live.json
+          grep -q '"enriched":true' /tmp/live.json
+          grep -q '"succeeded":1' /tmp/live.json
