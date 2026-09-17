@@ -4,7 +4,8 @@ on:
   push:
     branches:
       - main
-      - feature/live-data-resilience
+      - 'feature/**'
+      - 'fix/**'
   workflow_dispatch:
 
 permissions:
@@ -27,6 +28,7 @@ jobs:
 
       - name: Syntax validation
         run: |
+          node --check src/server.js
           node --check src/services/liveDataService.js
           node --check src/routes/live.js
           node --check scripts/testLiveDataResilience.js
