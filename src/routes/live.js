@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   DEFAULT_SYMBOLS,
   getLiveStatus,
+  getCachedIndicators,
   refreshIndicators,
   refreshMacroAndPersist,
   refreshNews,
@@ -32,41 +33,68 @@ router.get('/status', async (req, res) => {
 });
 
 router.get('/indicators', async (req, res) => {
-  try {
-    if (!isSupabaseEnabled()) {
-      return res.status(503).json({ error: 'Supabase backend not configured' });
+  const symbols = String(req.query.symbols || '')
+    .split(',')
+    .map((item) => item.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (isSupabaseEnabled()) {
+    try {
+      let query = supabase
+        .from('market_indicator_snapshots')
+        .select('symbol,provider,last_price,change,change_percent,avg_volume,candles,fetched_at')
+        .order('fetched_at', { ascending: false });
+
+      if (symbols.length > 0) {
+        query = query.in('symbol', symbols);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const unique = Array.from(
+        new Map((data || []).map((row) => [row.symbol, mapIndicatorRow(row)])).values()
+      );
+
+      if (unique.length > 0) {
+        return res.json({
+          source: 'supabase-cache',
+          count: unique.length,
+          updatedAt: new Date().toISOString(),
+          data: unique,
+        });
+      }
+    } catch (error) {
+      console.warn('Supabase indicator cache unavailable; falling back to runtime/provider data:', error.message);
     }
+  }
 
-    const symbols = String(req.query.symbols || '')
-      .split(',')
-      .map((item) => item.trim().toUpperCase())
-      .filter(Boolean);
-
-    let query = supabase
-      .from('market_indicator_snapshots')
-      .select('symbol,provider,last_price,change,change_percent,avg_volume,candles,fetched_at')
-      .order('fetched_at', { ascending: false });
-
-    if (symbols.length > 0) {
-      query = query.in('symbol', symbols);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const unique = Array.from(
-      new Map((data || []).map((row) => [row.symbol, mapIndicatorRow(row)])).values()
-    );
-
-    res.json({
-      source: 'supabase-cache',
-      count: unique.length,
+  const cached = getCachedIndicators(symbols);
+  if (cached.length > 0) {
+    return res.json({
+      source: 'runtime-cache',
+      count: cached.length,
       updatedAt: new Date().toISOString(),
-      data: unique,
+      data: cached,
+    });
+  }
+
+  try {
+    const refreshed = await refreshIndicators(symbols.length > 0 ? symbols : DEFAULT_SYMBOLS);
+    return res.json({
+      source: 'provider-refresh',
+      count: refreshed.data.length,
+      updatedAt: new Date().toISOString(),
+      failures: refreshed.failures,
+      data: refreshed.data,
     });
   } catch (error) {
     console.error('Live indicators failed:', error.message);
-    res.status(500).json({ error: 'Failed to get live indicators', message: error.message });
+    return res.status(503).json({
+      error: 'Live indicator providers unavailable',
+      message: error.message,
+      data: [],
+    });
   }
 });
 
