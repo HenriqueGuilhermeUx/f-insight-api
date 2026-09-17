@@ -8,7 +8,7 @@ const {
   refreshMacroAndPersist,
   refreshNews,
 } = require('../services/liveDataService');
-const { supabase, isSupabaseEnabled } = require('../services/supabaseClient');
+const { dataSupabase: supabase, isDataSupabaseEnabled: isSupabaseEnabled } = require('../services/dataSupabaseClient');
 
 function mapIndicatorRow(row) {
   return {
