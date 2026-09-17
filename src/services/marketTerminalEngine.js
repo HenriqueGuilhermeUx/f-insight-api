@@ -2,7 +2,11 @@
 
 const finnhub = require('./marketTerminal/providers/finnhubProvider');
 const openbb = require('./marketTerminal/providers/openbbProvider');
+const yahoo = require('./marketTerminal/providers/yahooProvider');
+const bcb = require('./marketTerminal/providers/bcbProvider');
+const cvm = require('./marketTerminal/providers/cvmProvider');
 const sentiment = require('./marketTerminal/sentimentEngine');
+const analytics = require('./marketTerminal/marketAnalytics');
 
 const INTERNAL_NOTICE = 'Internal research engine. Not a recommendation, signal, solicitation, or order execution service.';
 
@@ -12,10 +16,23 @@ function providerStatus() {
       enabled: finnhub.isEnabled(),
       role: ['quote', 'symbol-search', 'company-news'],
     },
+    yahoo: {
+      enabled: true,
+      role: ['historical-prices', 'fallback-quote', 'brasil-prototype'],
+    },
     openbb: {
       enabled: openbb.isEnabled(),
       role: ['historical-prices', 'provider-hub'],
       config: openbb.config(),
+    },
+    bcb: {
+      enabled: true,
+      role: ['selic', 'usdbrl', 'ipca', 'macro-brasil'],
+    },
+    cvm: {
+      enabled: true,
+      role: ['company-registry', 'regulatory-source-catalog'],
+      sources: cvm.sourceCatalog(),
     },
     adanos: {
       enabled: sentiment.isAdanosEnabled(),
@@ -41,6 +58,35 @@ function normalizeTextSentiment(items = []) {
   });
 }
 
+async function loadHistory(symbol, options, result) {
+  if (options.history === false) return null;
+
+  if (openbb.isEnabled()) {
+    try {
+      const history = await openbb.getHistoricalPrices(symbol, {
+        startDate: options.startDate,
+        endDate: options.endDate,
+        interval: options.interval || '1d',
+        provider: options.openbbProvider,
+      });
+      return { ...history, selectedProvider: 'openbb' };
+    } catch (error) {
+      result.errors.push({ provider: 'openbb', capability: 'historical-prices', message: error.message });
+    }
+  }
+
+  try {
+    const history = await yahoo.getHistoricalPrices(symbol, {
+      range: options.range || '1y',
+      interval: options.interval || '1d',
+    });
+    return { ...history, selectedProvider: 'yahoo' };
+  } catch (error) {
+    result.errors.push({ provider: 'yahoo', capability: 'historical-prices', message: error.message });
+    return null;
+  }
+}
+
 async function buildAssetResearchBundle(symbol, options = {}) {
   const result = {
     ok: true,
@@ -50,6 +96,8 @@ async function buildAssetResearchBundle(symbol, options = {}) {
     providers: providerStatus(),
     quote: null,
     history: null,
+    analytics: null,
+    macro: null,
     news: [],
     sentiment: null,
     errors: [],
@@ -72,16 +120,25 @@ async function buildAssetResearchBundle(symbol, options = {}) {
     }
   }
 
-  if (options.history !== false && openbb.isEnabled()) {
+  result.history = await loadHistory(symbol, options, result);
+  if (result.history?.rows?.length) {
+    result.analytics = analytics.summarizeHistory(result.history);
+    if (!result.quote && result.history.last) {
+      result.quote = {
+        provider: result.history.provider || 'yahoo',
+        symbol,
+        price: result.history.last.close,
+        timestamp: result.history.last.date,
+        fallback: true,
+      };
+    }
+  }
+
+  if (options.macro !== false) {
     try {
-      result.history = await openbb.getHistoricalPrices(symbol, {
-        startDate: options.startDate,
-        endDate: options.endDate,
-        interval: options.interval || '1d',
-        provider: options.openbbProvider,
-      });
+      result.macro = await bcb.getMacroSnapshot();
     } catch (error) {
-      result.errors.push({ provider: 'openbb', capability: 'historical-prices', message: error.message });
+      result.errors.push({ provider: 'bcb', capability: 'macro-snapshot', message: error.message });
     }
   }
 
@@ -103,6 +160,7 @@ async function buildAssetResearchBundle(symbol, options = {}) {
     weights: supplied.weights,
   });
 
+  result.ok = Boolean(result.quote || result.history || result.macro);
   return result;
 }
 
@@ -126,10 +184,11 @@ function buildTradingViewWidgetPlan(symbol) {
 
 function architecturePlan() {
   return {
-    marketData: ['Finnhub', 'OpenBB providers', 'BCB', 'CVM', 'future B3 licensed provider'],
+    marketData: ['Finnhub', 'Yahoo prototype', 'OpenBB providers', 'BCB', 'CVM', 'future B3 licensed provider'],
     visualization: ['TradingView embeddable widgets on frontend'],
     intelligence: ['F-Insight Agent', 'sentimentEngine', 'Quant Lab'],
     researchSignals: ['news', 'reddit', 'x', 'prediction-market context'],
+    analytics: ['historical volatility', 'annualized drift', 'moving averages', 'max drawdown'],
     storage: ['Supabase/Postgres cache after validation'],
     publicationStatus: 'internal-only',
   };
@@ -141,4 +200,7 @@ module.exports = {
   buildAssetResearchBundle,
   buildTradingViewWidgetPlan,
   architecturePlan,
+  bcb,
+  cvm,
+  analytics,
 };
