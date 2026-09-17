@@ -41,6 +41,9 @@ jobs:
       - name: Quant engine test
         run: npm run test:quant
 
+      - name: Quant numeric parsing test
+        run: npm run test:quant:numbers
+
       - name: Market terminal deterministic test
         run: npm run test:market-terminal
 
