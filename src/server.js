@@ -32,6 +32,8 @@ function buildAllowedOrigins() {
 
   return [
     ...configured,
+    'https://f-insight.org',
+    'https://www.f-insight.org',
     'https://f-insight.netlify.app',
     'https://finsight.netlify.app',
     'http://localhost:5173',
