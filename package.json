@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test:quant": "node scripts/testQuantLab.js"
+    "test:quant": "node scripts/testQuantLab.js",
+    "test:market-terminal": "node scripts/testMarketTerminalEngine.js",
+    "test:market-terminal:live": "node scripts/testMarketTerminalEngine.js --live"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.50.0",
