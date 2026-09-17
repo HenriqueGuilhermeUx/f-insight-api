@@ -11,11 +11,17 @@ const DEFAULTS = {
 
 function toNumber(value, fallback = 0) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const normalized = String(value || '')
-    .replace(/\./g, '')
-    .replace(',', '.')
-    .replace(/[^0-9.-]/g, '');
-  const parsed = Number(normalized);
+  let text = String(value ?? '').trim().replace(/\s/g, '').replace(/[^0-9,.-]/g, '');
+  if (!text) return fallback;
+  const commaIndex = text.lastIndexOf(',');
+  const dotIndex = text.lastIndexOf('.');
+  if (commaIndex >= 0 && dotIndex >= 0) {
+    if (commaIndex > dotIndex) text = text.replace(/\./g, '').replace(',', '.');
+    else text = text.replace(/,/g, '');
+  } else if (commaIndex >= 0) {
+    text = text.replace(',', '.');
+  }
+  const parsed = Number(text);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
