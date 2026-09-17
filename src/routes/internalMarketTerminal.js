@@ -121,7 +121,8 @@ router.post('/quant/scan-from-market', async function (req, res) {
     });
     const volatility = payload.annualVolatility || bundle.analytics?.volatility?.hv60 || bundle.analytics?.volatility?.hv120 || quantLab.DEFAULTS.annualVolatility;
     const drift = payload.annualDrift ?? bundle.analytics?.annualizedDrift ?? quantLab.DEFAULTS.annualDrift;
-    const riskFreeRate = payload.riskFreeRate ?? ((bundle.macro?.snapshot?.selicTarget?.value || 0) / 100) || quantLab.DEFAULTS.riskFreeRate;
+    const macroRiskFreeRate = (bundle.macro?.snapshot?.selicTarget?.value || 0) / 100;
+    const riskFreeRate = payload.riskFreeRate ?? (macroRiskFreeRate || quantLab.DEFAULTS.riskFreeRate);
     const spot = payload.spot || bundle.quote?.price || bundle.analytics?.lastPrice;
     const result = quantLab.runManualScan({
       ...payload,
