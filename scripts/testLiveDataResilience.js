@@ -67,6 +67,7 @@ async function main() {
   assert.equal(cachedNews[0].source, 'CI');
 
   console.log('live-data-resilience: ok');
+  process.exit(0);
 }
 
 main().catch((error) => {
