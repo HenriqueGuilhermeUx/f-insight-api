@@ -19,6 +19,7 @@ const billingRoutes = require('./routes/billing');
 const automationRoutes = require('./routes/automation');
 const finsightAgentRoutes = require('./routes/finsightAgent');
 const internalMarketTerminalRoutes = require('./routes/internalMarketTerminal');
+const internalAdvisorIntelligenceRoutes = require('./routes/internalAdvisorIntelligence');
 const { startCronJobs } = require('./services/cronService');
 const { isSupabaseEnabled } = require('./services/supabaseClient');
 
@@ -79,18 +80,23 @@ app.use('/api/automation', automationRoutes);
 app.use('/api/agent', finsightAgentRoutes);
 
 const internalMarketTerminalEnabled = process.env.INTERNAL_MARKET_TERMINAL_ENABLED === 'true';
+const internalAdvisorIntelligenceEnabled = process.env.INTERNAL_ADVISOR_INTELLIGENCE_ENABLED === 'true';
 if (internalMarketTerminalEnabled) {
   app.use('/api/internal/market-terminal', internalMarketTerminalRoutes);
+}
+if (internalAdvisorIntelligenceEnabled) {
+  app.use('/api/internal/advisor-intelligence', internalAdvisorIntelligenceRoutes);
 }
 
 app.get('/', (req, res) => {
   res.json({
     name: 'F-Insight API',
     status: 'ok',
-    version: '1.6.0',
+    version: '1.7.0',
     supabase: isSupabaseEnabled(),
     cors: { netlifyAllowed: true, configuredOrigins: allowedOrigins },
     internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
+    internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled',
     modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing', 'automation-bridge', 'finsight-agent']
   });
 });
@@ -99,11 +105,12 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.6.0',
+    version: '1.7.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled',
     agent: 'enabled',
-    internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled'
+    internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
+    internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled'
   });
 });
 
@@ -111,11 +118,12 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.6.0',
+    version: '1.7.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled',
     agent: 'enabled',
-    internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled'
+    internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
+    internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled'
   });
 });
 

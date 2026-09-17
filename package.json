@@ -9,7 +9,8 @@
     "test:quant": "node scripts/testQuantLab.js",
     "test:quant:numbers": "node scripts/testQuantNumberParsing.js",
     "test:market-terminal": "node scripts/testMarketTerminalEngine.js",
-    "test:market-terminal:live": "node scripts/testMarketTerminalEngine.js --live"
+    "test:market-terminal:live": "node scripts/testMarketTerminalEngine.js --live",
+    "test:advisor-intelligence": "node scripts/testAdvisorIntelligence.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.50.0",

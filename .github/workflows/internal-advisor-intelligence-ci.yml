@@ -1,0 +1,62 @@
+name: Internal Advisor Intelligence CI
+
+on:
+  push:
+    branches:
+      - feature/advisor-intelligence-internal
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax validation
+        run: |
+          node --check src/server.js
+          node --check src/routes/internalAdvisorIntelligence.js
+          node --check src/services/advisorIntelligenceEngine.js
+
+      - name: Advisor engine test
+        run: npm run test:advisor-intelligence
+
+      - name: Authenticated advisor API smoke test
+        env:
+          NODE_ENV: production
+          ENABLE_CRON: 'false'
+          INTERNAL_MARKET_TERMINAL_ENABLED: 'false'
+          INTERNAL_ADVISOR_INTELLIGENCE_ENABLED: 'true'
+          FINSIGHT_INTERNAL_API_KEY: ci-advisor-key
+          PORT: '3211'
+        run: |
+          set -euo pipefail
+          node src/server.js >/tmp/finsight-advisor.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true; cat /tmp/finsight-advisor.log || true' EXIT
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:3211/health >/tmp/health.json; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3211/health | grep -q 'internalAdvisorIntelligence'
+          UNAUTH_CODE=$(curl -s -o /tmp/unauth.json -w '%{http_code}' http://127.0.0.1:3211/api/internal/advisor-intelligence/health)
+          test "$UNAUTH_CODE" = '401'
+          curl -fsS -H 'X-FInsight-Internal-Key: ci-advisor-key' http://127.0.0.1:3211/api/internal/advisor-intelligence/health | grep -q 'internal-only'
+          curl -fsS -H 'X-FInsight-Internal-Key: ci-advisor-key' -H 'Content-Type: application/json' \
+            -d '{"clientId":"c1","holdings":[{"symbol":"PETR4","quantity":1000,"price":42,"assetClass":"stock","sector":"energy","currency":"BRL"},{"symbol":"TESOURO","marketValue":100000,"assetClass":"fixed-income","sector":"sovereign","currency":"BRL"}]}' \
+            http://127.0.0.1:3211/api/internal/advisor-intelligence/portfolio/analyze | grep -q 'concentration'
+          curl -fsS -H 'X-FInsight-Internal-Key: ci-advisor-key' -H 'Content-Type: application/json' \
+            -d '{"clientId":"c1","holdings":[{"symbol":"PETR4","marketValue":50000,"assetClass":"stock","sector":"energy","currency":"BRL"}],"scenario":{"name":"shock","assetClassShocks":{"stock":-0.1}}}' \
+            http://127.0.0.1:3211/api/internal/advisor-intelligence/portfolio/stress | grep -q 'stressedValue'
