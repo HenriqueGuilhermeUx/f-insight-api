@@ -11,7 +11,8 @@
     "test:market-terminal": "node scripts/testMarketTerminalEngine.js",
     "test:market-terminal:live": "node scripts/testMarketTerminalEngine.js --live",
     "test:advisor-intelligence": "node scripts/testAdvisorIntelligence.js",
-    "test:advisor-enrichment": "node scripts/testAdvisorMarketEnrichment.js"
+    "test:advisor-enrichment": "node scripts/testAdvisorMarketEnrichment.js",
+    "test:user-preferences": "node scripts/testUserMarketPreferencesStore.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.50.0",

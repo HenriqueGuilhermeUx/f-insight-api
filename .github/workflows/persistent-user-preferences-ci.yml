@@ -1,0 +1,65 @@
+name: Persistent User Preferences CI
+
+on:
+  push:
+    branches:
+      - feature/persistent-watchlist-alerts
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax validation
+        run: |
+          node --check src/services/userMarketPreferencesStore.js
+          node --check src/routes/watchlist.js
+          node --check src/routes/alerts.js
+          node --check src/server.js
+
+      - name: Store compatibility test
+        run: npm run test:user-preferences
+
+      - name: HTTP compatibility smoke test
+        env:
+          NODE_ENV: production
+          ENABLE_CRON: 'false'
+          PORT: '3213'
+        run: |
+          set -euo pipefail
+          node src/server.js >/tmp/finsight-prefs.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true; cat /tmp/finsight-prefs.log || true' EXIT
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:3213/health >/dev/null; then break; fi
+            sleep 1
+          done
+
+          curl -fsS -H 'Content-Type: application/json' \
+            -d '{"ticker":"petr4","name":"Petrobras","type":"stock"}' \
+            http://127.0.0.1:3213/api/watchlist/ci-user | grep -q 'PETR4'
+          curl -fsS http://127.0.0.1:3213/api/watchlist/ci-user | grep -q 'PETR4'
+          curl -fsS -X DELETE http://127.0.0.1:3213/api/watchlist/ci-user/PETR4 | grep -q '"success":true'
+
+          curl -fsS -H 'Content-Type: application/json' \
+            -d '{"userId":"ci-user","ticker":"VALE3","type":"price_below","value":55.25}' \
+            http://127.0.0.1:3213/api/alerts > /tmp/alert.json
+          grep -q 'VALE3' /tmp/alert.json
+          ALERT_ID=$(node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/alert.json')); process.stdout.write(j.alert.id)")
+          curl -fsS -X PATCH -H 'Content-Type: application/json' -d '{"enabled":false,"value":54.5}' \
+            http://127.0.0.1:3213/api/alerts/$ALERT_ID | grep -q '"enabled":false'
+          curl -fsS -X DELETE http://127.0.0.1:3213/api/alerts/$ALERT_ID | grep -q '"success":true'
