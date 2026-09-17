@@ -4,6 +4,8 @@ const express = require('express');
 const router = express.Router();
 const terminal = require('../services/marketTerminalEngine');
 const quantLab = require('../services/quantLabEngine');
+const optionsAnalytics = require('../services/marketTerminal/optionsAnalytics');
+const strategyEngine = require('../services/marketTerminal/strategyEngine');
 const { parseOptionChainCsv } = require('../services/marketTerminal/optionChainCsv');
 const { requireInternalAccess } = require('../services/marketTerminal/internalAccess');
 
@@ -22,6 +24,10 @@ router.get('/health', function (_req, res) {
 
 router.get('/providers', function (_req, res) {
   res.json({ ok: true, providers: terminal.providerStatus() });
+});
+
+router.get('/tradingview/:symbol', function (req, res) {
+  res.json({ ok: true, plan: terminal.buildTradingViewWidgetPlan(req.params.symbol) });
 });
 
 router.get('/asset/:symbol', async function (req, res) {
@@ -58,6 +64,10 @@ router.get('/bcb/series/:code', async function (req, res) {
   }
 });
 
+router.get('/cvm/sources', function (_req, res) {
+  res.json({ ok: true, sources: terminal.cvm.sourceCatalog() });
+});
+
 router.get('/cvm/search', async function (req, res) {
   try {
     const results = await terminal.cvm.searchCompanies(req.query.q || '', { limit: req.query.limit });
@@ -70,6 +80,22 @@ router.get('/cvm/search', async function (req, res) {
 router.post('/options/import-csv', function (req, res) {
   const parsed = parseOptionChainCsv(req.body?.csv || req.body?.text || '', req.body?.defaults || {});
   res.status(parsed.errors.length && !parsed.rows.length ? 400 : 200).json({ ok: parsed.rows.length > 0, ...parsed });
+});
+
+router.post('/quant/option-risk', function (req, res) {
+  try {
+    res.json({ ok: true, analysis: optionsAnalytics.analyzeLongOption(req.body || {}) });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: 'OPTION_RISK_FAILED', message: error.message });
+  }
+});
+
+router.post('/quant/strategy', function (req, res) {
+  try {
+    res.json(strategyEngine.analyzeStrategy(req.body || {}));
+  } catch (error) {
+    res.status(400).json({ ok: false, error: 'STRATEGY_ANALYSIS_FAILED', message: error.message });
+  }
 });
 
 router.post('/quant/scan', function (req, res) {
