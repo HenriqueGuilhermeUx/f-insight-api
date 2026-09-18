@@ -1,0 +1,51 @@
+name: Auth Authorization CI
+
+on:
+  push:
+    branches:
+      - fix/auth-authorization-hardening
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax validation
+        run: |
+          node --check src/services/authMiddleware.js
+          node --check src/routes/watchlist.js
+          node --check src/routes/alerts.js
+          node --check src/routes/billing.js
+          node --check src/services/userMarketPreferencesStore.js
+
+      - name: User preference ownership tests
+        run: npm run test:user-preferences
+
+      - name: Role authority tests
+        run: |
+          node - <<'NODE'
+          const { normalizeRole } = require('./src/services/authMiddleware');
+          const assert = (condition, message) => { if (!condition) throw new Error(message); };
+          assert(normalizeRole({ user_metadata: { role: 'admin' }, app_metadata: {} }) === 'client', 'user_metadata must not grant admin');
+          assert(normalizeRole({ user_metadata: { role: 'advisor' }, app_metadata: {} }) === 'client', 'user_metadata must not grant advisor');
+          assert(normalizeRole({ app_metadata: { role: 'advisor' } }) === 'advisor', 'server app_metadata advisor should be accepted');
+          assert(normalizeRole({ app_metadata: { role: 'tenant_admin' } }) === 'admin', 'server app_metadata tenant_admin should map to admin');
+          console.log('role authority contract ok');
+          NODE
