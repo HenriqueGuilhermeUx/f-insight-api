@@ -10,23 +10,33 @@ const WOOVI_API_KEY = process.env.WOOVI_API_KEY || process.env.WOOVI_APP_ID || p
 const APP_URL = process.env.APP_URL || process.env.FRONTEND_URL || 'https://f-insight.org';
 
 const PLANS = {
+  individual: {
+    id: 'individual',
+    name: 'F-Insight Premium Individual',
+    priceCents: Number(process.env.BILLING_INDIVIDUAL_CENTS || 1990),
+    description: 'Meu Futuro IA, Radar IA, watchlist, alertas e ferramentas premium.',
+    audience: 'individual',
+  },
   basic: {
     id: 'basic',
     name: 'F-Insight Basic',
     priceCents: Number(process.env.BILLING_BASIC_CENTS || 49700),
     description: 'Portal white-label, relatórios e cliente final.',
+    audience: 'office',
   },
   pro: {
     id: 'pro',
     name: 'F-Insight Pro',
     priceCents: Number(process.env.BILLING_PRO_CENTS || 99700),
     description: 'Basic + conteúdo semanal e calendário editorial.',
+    audience: 'office',
   },
   premium: {
     id: 'premium',
     name: 'F-Insight Premium',
     priceCents: Number(process.env.BILLING_PREMIUM_CENTS || 199700),
     description: 'Pro + ferramentas Graham, radar premium, PDF e automações.',
+    audience: 'office',
   },
 };
 
@@ -39,7 +49,7 @@ function makeCorrelationId(planId, tenantId) {
 function requirePlan(planId) {
   const plan = PLANS[planId];
   if (!plan) {
-    const error = new Error('Plano inválido. Use basic, pro ou premium.');
+    const error = new Error(`Plano inválido. Use um destes planos: ${Object.keys(PLANS).join(', ')}.`);
     error.statusCode = 400;
     throw error;
   }
@@ -118,13 +128,14 @@ async function persistInvoice(invoice) {
 async function createDemoCharge(input) {
   const plan = requirePlan(input.planId || 'pro');
   const correlationId = makeCorrelationId(plan.id, input.tenantId);
-  const paymentLinkUrl = `${APP_URL}/admin/cobranca?demoPaid=${encodeURIComponent(correlationId)}`;
+  const demoPath = plan.audience === 'individual' ? '/premium' : '/admin/cobranca';
+  const paymentLinkUrl = `${APP_URL}${demoPath}?demoPaid=${encodeURIComponent(correlationId)}`;
 
   const invoice = {
     tenantId: input.tenantId,
     planId: plan.id,
     planName: plan.name,
-    customerName: input.customerName || 'Escritório Demo',
+    customerName: input.customerName || (plan.audience === 'individual' ? 'Cliente F-Insight' : 'Escritório Demo'),
     customerEmail: input.customerEmail || 'financeiro@demo.com',
     customerTaxId: input.customerTaxId || null,
     amountCents: plan.priceCents,
@@ -134,7 +145,7 @@ async function createDemoCharge(input) {
     paymentLinkUrl,
     brCode: `000201DEMO-FINSIGHT-${correlationId}`,
     qrCodeImage: null,
-    metadata: { demo: true, planDescription: plan.description },
+    metadata: { demo: true, planDescription: plan.description, audience: plan.audience },
   };
 
   const persisted = await persistInvoice(invoice);
@@ -155,14 +166,14 @@ async function createWooviCharge(input) {
     comment: `${plan.name} - assinatura mensal F-Insight`,
     expiresIn: Number(process.env.WOOVI_CHARGE_EXPIRES_IN || 86400),
     customer: {
-      name: input.customerName || 'Escritório',
+      name: input.customerName || (plan.audience === 'individual' ? 'Cliente F-Insight' : 'Escritório'),
       email: input.customerEmail || undefined,
       taxID: input.customerTaxId || undefined,
     },
     additionalInfo: [
-      { key: 'Produto', value: 'F-Insight White Label' },
+      { key: 'Produto', value: plan.audience === 'individual' ? 'F-Insight Premium Individual' : 'F-Insight White Label' },
       { key: 'Plano', value: plan.name },
-      { key: 'Tenant', value: String(input.tenantId || 'demo') },
+      { key: 'Conta', value: String(input.tenantId || 'individual') },
     ],
   };
 
@@ -186,7 +197,7 @@ async function createWooviCharge(input) {
     paymentLinkUrl: getPaymentLink(charge),
     brCode: getBrCode(charge),
     qrCodeImage: getQrCode(charge),
-    metadata: { rawProviderStatus: charge.status || null, planDescription: plan.description },
+    metadata: { rawProviderStatus: charge.status || null, planDescription: plan.description, audience: plan.audience },
   };
 
   const persisted = await persistInvoice(invoice);
