@@ -207,7 +207,8 @@ async function createAlert(payload = {}) {
   return { ...alert };
 }
 
-async function updateAlert(alertIdInput, changes = {}) {
+async function updateAlert(userIdInput, alertIdInput, changes = {}) {
+  const userId = cleanUserId(userIdInput);
   const alertId = String(alertIdInput || '').trim();
   if (!alertId) return null;
 
@@ -229,6 +230,7 @@ async function updateAlert(alertIdInput, changes = {}) {
         .from(ALERTS_TABLE)
         .update(patch)
         .eq('id', alertId)
+        .eq('user_id', userId)
         .select('id,ticker,type,value,enabled,created_at,triggered_at')
         .maybeSingle();
       if (error) throw error;
@@ -239,18 +241,16 @@ async function updateAlert(alertIdInput, changes = {}) {
     }
   }
 
-  for (const [userId, alerts] of memoryAlerts.entries()) {
-    const index = alerts.findIndex((alert) => alert.id === alertId);
-    if (index !== -1) {
-      alerts[index] = { ...alerts[index], ...patch };
-      memoryAlerts.set(userId, alerts);
-      return { ...alerts[index] };
-    }
-  }
-  return null;
+  const alerts = memoryAlerts.get(userId) || [];
+  const index = alerts.findIndex((alert) => alert.id === alertId);
+  if (index === -1) return null;
+  alerts[index] = { ...alerts[index], ...patch };
+  memoryAlerts.set(userId, alerts);
+  return { ...alerts[index] };
 }
 
-async function deleteAlert(alertIdInput) {
+async function deleteAlert(userIdInput, alertIdInput) {
+  const userId = cleanUserId(userIdInput);
   const alertId = String(alertIdInput || '').trim();
   if (!alertId) return false;
 
@@ -260,6 +260,7 @@ async function deleteAlert(alertIdInput) {
         .from(ALERTS_TABLE)
         .delete()
         .eq('id', alertId)
+        .eq('user_id', userId)
         .select('id');
       if (error) throw error;
       return Array.isArray(data) && data.length > 0;
@@ -268,14 +269,11 @@ async function deleteAlert(alertIdInput) {
     }
   }
 
-  for (const [userId, alerts] of memoryAlerts.entries()) {
-    const next = alerts.filter((alert) => alert.id !== alertId);
-    if (next.length !== alerts.length) {
-      memoryAlerts.set(userId, next);
-      return true;
-    }
-  }
-  return false;
+  const alerts = memoryAlerts.get(userId) || [];
+  const next = alerts.filter((alert) => alert.id !== alertId);
+  if (next.length === alerts.length) return false;
+  memoryAlerts.set(userId, next);
+  return true;
 }
 
 function storageMode() {
