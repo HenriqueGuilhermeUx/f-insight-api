@@ -6,6 +6,10 @@ on:
       - main
       - feature/persistent-watchlist-alerts
       - feature/preferences-storage-health
+      - fix/secure-contract-ci
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -33,10 +37,10 @@ jobs:
           node --check src/routes/alerts.js
           node --check src/server.js
 
-      - name: Store compatibility test
+      - name: Store ownership test
         run: npm run test:user-preferences
 
-      - name: HTTP compatibility smoke test
+      - name: HTTP secure contract smoke test
         env:
           NODE_ENV: production
           ENABLE_CRON: 'false'
@@ -51,19 +55,32 @@ jobs:
             sleep 1
           done
 
-          curl -fsS http://127.0.0.1:3213/api/watchlist/_health/storage | grep -q '"service":"user-market-preferences"'
+          curl -fsS http://127.0.0.1:3213/api/watchlist/_health/storage > /tmp/storage-health.json
+          grep -q '"service":"user-market-preferences"' /tmp/storage-health.json
+          grep -q '"access":"authenticated-owner-only"' /tmp/storage-health.json
 
-          curl -fsS -H 'Content-Type: application/json' \
-            -d '{"ticker":"petr4","name":"Petrobras","type":"stock"}' \
-            http://127.0.0.1:3213/api/watchlist/ci-user | grep -q 'PETR4'
-          curl -fsS http://127.0.0.1:3213/api/watchlist/ci-user | grep -q 'PETR4'
-          curl -fsS -X DELETE http://127.0.0.1:3213/api/watchlist/ci-user/PETR4 | grep -q '"success":true'
+          assert_blocked_without_auth() {
+            local method="$1"
+            local path="$2"
+            local body="${3:-}"
+            local output="$4"
+            if [ -n "$body" ]; then
+              code=$(curl --silent --show-error -o "$output" -w "%{http_code}" -X "$method" -H 'Content-Type: application/json' -d "$body" "http://127.0.0.1:3213$path" || true)
+            else
+              code=$(curl --silent --show-error -o "$output" -w "%{http_code}" -X "$method" "http://127.0.0.1:3213$path" || true)
+            fi
 
-          curl -fsS -H 'Content-Type: application/json' \
-            -d '{"userId":"ci-user","ticker":"VALE3","type":"price_below","value":55.25}' \
-            http://127.0.0.1:3213/api/alerts > /tmp/alert.json
-          grep -q 'VALE3' /tmp/alert.json
-          ALERT_ID=$(node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/alert.json')); process.stdout.write(j.alert.id)")
-          curl -fsS -X PATCH -H 'Content-Type: application/json' -d '{"enabled":false,"value":54.5}' \
-            http://127.0.0.1:3213/api/alerts/$ALERT_ID | grep -q '"enabled":false'
-          curl -fsS -X DELETE http://127.0.0.1:3213/api/alerts/$ALERT_ID | grep -q '"success":true'
+            # CI intentionally has no Supabase Auth configuration, so protected routes
+            # must fail closed with 503 rather than accept arbitrary client-owned IDs.
+            if [ "$code" != "503" ] && [ "$code" != "401" ]; then
+              echo "$method $path should fail closed without auth; got HTTP $code"
+              cat "$output" || true
+              exit 1
+            fi
+          }
+
+          assert_blocked_without_auth GET /api/watchlist/me '' /tmp/watchlist-me.json
+          assert_blocked_without_auth POST /api/watchlist/me '{"ticker":"PETR4"}' /tmp/watchlist-post.json
+          assert_blocked_without_auth POST /api/watchlist/ci-user '{"ticker":"PETR4"}' /tmp/watchlist-legacy.json
+          assert_blocked_without_auth GET /api/alerts/me '' /tmp/alerts-me.json
+          assert_blocked_without_auth POST /api/alerts '{"userId":"attacker-selected","ticker":"VALE3","type":"price_below","value":55.25}' /tmp/alerts-post.json
