@@ -8,6 +8,10 @@ on:
       - ci/shared-supabase-persistence-smoke
       - ci/market-universe-smoke
       - release/premium-entitlement
+      - fix/secure-contract-ci
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -46,10 +50,28 @@ jobs:
           request_until_ok "/api/agent/health" /tmp/agent.json
           grep -q 'finsight-agent' /tmp/agent.json
 
-          request_until_ok "/api/watchlist/_health/storage" /tmp/storage.json
-          grep -q '"service":"user-market-preferences"' /tmp/storage.json
-          grep -q '"storageMode":"dedicated-data-supabase-with-memory-fallback"' /tmp/storage.json
-          grep -q '"access":"authenticated-owner-only"' /tmp/storage.json
+          # A previous Render revision can already answer HTTP 200 while the new
+          # revision is still deploying. Wait for the secure contract marker,
+          # not merely for a successful status code.
+          storage_ready=false
+          for attempt in {1..30}; do
+            code=$(curl --silent --show-error --max-time 25 -o /tmp/storage.json -w "%{http_code}" "$BASE/api/watchlist/_health/storage" || true)
+            if [ "$code" = "200" ] \
+              && grep -q '"service":"user-market-preferences"' /tmp/storage.json \
+              && grep -q '"storageMode":"dedicated-data-supabase-with-memory-fallback"' /tmp/storage.json \
+              && grep -q '"access":"authenticated-owner-only"' /tmp/storage.json; then
+              storage_ready=true
+              break
+            fi
+            echo "attempt $attempt: waiting for authenticated-owner-only storage contract (HTTP $code)"
+            sleep 5
+          done
+
+          if [ "$storage_ready" != "true" ]; then
+            echo "Timed out waiting for secure storage contract"
+            cat /tmp/storage.json || true
+            exit 1
+          fi
 
           request_until_ok "/api/live/indicators" /tmp/indicators.json
           node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('/tmp/indicators.json')); if (!Array.isArray(j.data) || j.data.length < 1) { console.error(j); process.exit(1) } console.log('indicator source:', j.source, 'count:', j.data.length)"
