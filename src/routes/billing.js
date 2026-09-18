@@ -10,6 +10,7 @@ const {
   updateInvoiceFromWebhook,
 } = require('../services/wooviBillingService');
 const { verifyWooviWebhook } = require('../services/wooviWebhookVerifier');
+const { requireAuthenticatedUser } = require('../services/authMiddleware');
 
 function publicInvoice(invoice) {
   if (!invoice) return null;
@@ -32,6 +33,10 @@ function publicInvoice(invoice) {
   };
 }
 
+function invoiceTenantId(invoice) {
+  return String(invoice?.tenant_id || invoice?.tenantId || '');
+}
+
 router.get('/plans', (_req, res) => {
   res.json({
     provider: 'woovi',
@@ -41,17 +46,24 @@ router.get('/plans', (_req, res) => {
   });
 });
 
-router.post('/checkout', async (req, res) => {
+router.post('/checkout', requireAuthenticatedUser, async (req, res) => {
   try {
+    const planId = req.body?.planId || 'individual';
+    const isIndividual = planId === 'individual';
+
+    if (!isIndividual && req.authUser.role !== 'admin') {
+      return res.status(403).json({ ok: false, error: 'FORBIDDEN_BILLING_PLAN' });
+    }
+
     const invoice = await createWooviCharge({
-      tenantId: req.body?.tenantId,
-      planId: req.body?.planId || 'pro',
+      tenantId: isIndividual ? req.authUser.id : req.body?.tenantId,
+      planId,
       customerName: req.body?.customerName,
-      customerEmail: req.body?.customerEmail,
+      customerEmail: isIndividual ? req.authUser.email : req.body?.customerEmail,
       customerTaxId: req.body?.customerTaxId,
     });
 
-    res.json({
+    return res.json({
       ok: true,
       provider: 'woovi',
       demoMode: !isWooviConfigured(),
@@ -60,7 +72,7 @@ router.post('/checkout', async (req, res) => {
     });
   } catch (error) {
     console.error('Billing checkout failed:', error.response?.data || error.message);
-    res.status(error.statusCode || 500).json({
+    return res.status(error.statusCode || 500).json({
       ok: false,
       error: 'Falha ao gerar cobrança',
       message: error.response?.data?.message || error.message,
@@ -68,9 +80,9 @@ router.post('/checkout', async (req, res) => {
   }
 });
 
-router.post('/entitlement', async (req, res) => {
+router.post('/entitlement', requireAuthenticatedUser, async (req, res) => {
   try {
-    const entitlement = await getIndividualEntitlement(req.body?.accountId);
+    const entitlement = await getIndividualEntitlement(req.authUser.id);
     return res.json({ ok: true, entitlement });
   } catch (error) {
     return res.status(error.statusCode || 500).json({
@@ -81,10 +93,16 @@ router.post('/entitlement', async (req, res) => {
   }
 });
 
-router.get('/invoice/:correlationId', async (req, res) => {
+router.get('/invoice/:correlationId', requireAuthenticatedUser, async (req, res) => {
   try {
     const invoice = await getInvoiceByCorrelationId(req.params.correlationId);
     if (!invoice) return res.status(404).json({ ok: false, error: 'Cobrança não encontrada' });
+
+    const ownsInvoice = invoiceTenantId(invoice) === req.authUser.id;
+    if (!ownsInvoice && req.authUser.role !== 'admin') {
+      return res.status(404).json({ ok: false, error: 'Cobrança não encontrada' });
+    }
+
     return res.json({ ok: true, invoice: publicInvoice(invoice) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: 'Falha ao consultar cobrança', message: error.message });
