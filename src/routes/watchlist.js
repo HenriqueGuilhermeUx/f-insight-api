@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const store = require('../services/userMarketPreferencesStore');
+const { requireAuthenticatedUser } = require('../services/authMiddleware');
 
 router.get('/_health/storage', (_req, res) => {
   res.json({
@@ -9,43 +10,45 @@ router.get('/_health/storage', (_req, res) => {
     storageMode: store.storageMode(),
     watchlistTable: store.WATCHLIST_TABLE,
     alertsTable: store.ALERTS_TABLE,
+    access: 'authenticated-owner-only',
   });
 });
 
-router.get('/:userId', async (req, res) => {
+router.use(requireAuthenticatedUser);
+
+router.get('/me', async (req, res) => {
   try {
-    const watchlist = await store.getWatchlist(req.params.userId);
-    res.json(watchlist);
+    const watchlist = await store.getWatchlist(req.authUser.id);
+    return res.json(watchlist);
   } catch (error) {
     console.error('Error fetching watchlist:', error.message);
-    const status = error.code === 'USER_ID_REQUIRED' ? 400 : 500;
-    res.status(status).json({ error: status === 400 ? error.message : 'Failed to fetch watchlist' });
+    return res.status(500).json({ error: 'Failed to fetch watchlist' });
   }
 });
 
-router.post('/:userId', async (req, res) => {
+router.post('/me', async (req, res) => {
   try {
-    const watchlist = await store.addWatchlistItem(req.params.userId, req.body || {});
-    res.json({ success: true, watchlist });
+    const watchlist = await store.addWatchlistItem(req.authUser.id, req.body || {});
+    return res.json({ success: true, watchlist });
   } catch (error) {
     console.error('Error adding to watchlist:', error.message);
-    if (['USER_ID_REQUIRED', 'TICKER_REQUIRED', 'WATCHLIST_DUPLICATE'].includes(error.code)) {
+    if (['TICKER_REQUIRED', 'WATCHLIST_DUPLICATE'].includes(error.code)) {
       return res.status(400).json({ error: error.message });
     }
-    res.status(500).json({ error: 'Failed to add to watchlist' });
+    return res.status(500).json({ error: 'Failed to add to watchlist' });
   }
 });
 
-router.delete('/:userId/:ticker', async (req, res) => {
+router.delete('/me/:ticker', async (req, res) => {
   try {
-    const watchlist = await store.removeWatchlistItem(req.params.userId, req.params.ticker);
-    res.json({ success: true, watchlist });
+    const watchlist = await store.removeWatchlistItem(req.authUser.id, req.params.ticker);
+    return res.json({ success: true, watchlist });
   } catch (error) {
     console.error('Error removing from watchlist:', error.message);
-    if (['USER_ID_REQUIRED', 'TICKER_REQUIRED'].includes(error.code)) {
+    if (error.code === 'TICKER_REQUIRED') {
       return res.status(400).json({ error: error.message });
     }
-    res.status(500).json({ error: 'Failed to remove from watchlist' });
+    return res.status(500).json({ error: 'Failed to remove from watchlist' });
   }
 });
 
