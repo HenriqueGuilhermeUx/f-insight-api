@@ -67,8 +67,6 @@ app.use(morgan('combined'));
 app.use(express.json({
   limit: '8mb',
   verify(req, _res, buf) {
-    // Woovi signs the exact raw request body. Keep the Buffer so the billing webhook
-    // can verify x-webhook-signature before trusting the parsed JSON payload.
     req.rawBody = Buffer.from(buf);
   },
 }));
@@ -128,17 +126,21 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     version: '1.7.0',
+    supabase: isSupabaseEnabled(),
+    cors: 'netlify-enabled',
+    agent: 'enabled',
+    internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
+    internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled'
   });
 });
 
-const port = Number(process.env.PORT || 3000);
-const server = app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+app.use((err, req, res, next) => {
+  console.error(err.stack || err.message);
+  res.status(500).json({ error: 'Something went wrong!', message: err.message });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
   startCronJobs();
 });
-
-server.on('error', (error) => {
-  console.error('Server error:', error);
-});
-
-module.exports = app;
