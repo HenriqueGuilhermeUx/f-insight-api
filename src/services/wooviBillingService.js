@@ -1,9 +1,13 @@
 const axios = require('axios');
-const { supabase, isSupabaseEnabled } = require('./supabaseClient');
+const {
+  dataSupabase: supabase,
+  isDataSupabaseEnabled: isSupabaseEnabled,
+  dataSupabaseMode,
+} = require('./dataSupabaseClient');
 
-const WOOVI_BASE_URL = process.env.WOOVI_BASE_URL || 'https://api.woovi.com';
+const WOOVI_BASE_URL = (process.env.WOOVI_BASE_URL || 'https://api.woovi.com').replace(/\/$/, '');
 const WOOVI_API_KEY = process.env.WOOVI_API_KEY || process.env.WOOVI_APP_ID || process.env.OPENPIX_APP_ID;
-const APP_URL = process.env.APP_URL || process.env.FRONTEND_URL || 'https://f-insight.netlify.app';
+const APP_URL = process.env.APP_URL || process.env.FRONTEND_URL || 'https://f-insight.org';
 
 const PLANS = {
   basic: {
@@ -46,6 +50,10 @@ function isWooviConfigured() {
   return Boolean(WOOVI_API_KEY);
 }
 
+function billingPersistenceMode() {
+  return isSupabaseEnabled() ? dataSupabaseMode() : 'disabled';
+}
+
 function getWooviHeaders() {
   return {
     Authorization: WOOVI_API_KEY,
@@ -70,7 +78,7 @@ function getBrCode(charge) {
 }
 
 async function persistInvoice(invoice) {
-  if (!isSupabaseEnabled()) return { ok: false, error: 'Supabase disabled' };
+  if (!isSupabaseEnabled()) return { ok: false, error: 'Billing persistence disabled' };
 
   const row = {
     tenant_id: invoice.tenantId || null,
@@ -89,22 +97,28 @@ async function persistInvoice(invoice) {
     br_code: invoice.brCode || null,
     qr_code_image: invoice.qrCodeImage || null,
     metadata: invoice.metadata || {},
+    updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from('billing_invoices')
-    .insert(row)
-    .select('id')
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from('billing_invoices')
+      .insert(row)
+      .select('id')
+      .maybeSingle();
 
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, id: data?.id };
+    if (error) throw error;
+    return { ok: true, id: data?.id };
+  } catch (error) {
+    console.warn('Billing invoice persistence failed:', error.message);
+    return { ok: false, error: error.message };
+  }
 }
 
 async function createDemoCharge(input) {
   const plan = requirePlan(input.planId || 'pro');
   const correlationId = makeCorrelationId(plan.id, input.tenantId);
-  const paymentLinkUrl = `${APP_URL}/admin/cobranca?demoPaid=${correlationId}`;
+  const paymentLinkUrl = `${APP_URL}/admin/cobranca?demoPaid=${encodeURIComponent(correlationId)}`;
 
   const invoice = {
     tenantId: input.tenantId,
@@ -182,18 +196,23 @@ async function createWooviCharge(input) {
 async function getInvoiceByCorrelationId(correlationId) {
   if (!isSupabaseEnabled()) return null;
 
-  const { data, error } = await supabase
-    .from('billing_invoices')
-    .select('*')
-    .eq('correlation_id', correlationId)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from('billing_invoices')
+      .select('*')
+      .eq('correlation_id', correlationId)
+      .maybeSingle();
 
-  if (error) return null;
-  return data || null;
+    if (error) throw error;
+    return data || null;
+  } catch (error) {
+    console.warn('Billing invoice lookup failed:', error.message);
+    return null;
+  }
 }
 
 async function updateInvoiceFromWebhook(payload) {
-  if (!isSupabaseEnabled()) return { ok: false, error: 'Supabase disabled' };
+  if (!isSupabaseEnabled()) return { ok: false, error: 'Billing persistence disabled' };
 
   const charge = extractCharge(payload);
   const correlationId = charge.correlationID || charge.correlationId || payload?.correlationID;
@@ -206,22 +225,27 @@ async function updateInvoiceFromWebhook(payload) {
     status: isPaid ? 'paid' : (status || 'updated'),
     paid_at: isPaid ? new Date().toISOString() : null,
     provider_charge_id: charge.identifier || charge.id || null,
-    metadata: { webhook: payload },
+    metadata: { webhookEvent: payload?.event || payload?.type || null },
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase
-    .from('billing_invoices')
-    .update(update)
-    .eq('correlation_id', correlationId);
+  try {
+    const { error } = await supabase
+      .from('billing_invoices')
+      .update(update)
+      .eq('correlation_id', correlationId);
 
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, correlationId, status: update.status };
+    if (error) throw error;
+    return { ok: true, correlationId, status: update.status };
+  } catch (error) {
+    return { ok: false, error: error.message, correlationId };
+  }
 }
 
 module.exports = {
   PLANS,
   isWooviConfigured,
+  billingPersistenceMode,
   createWooviCharge,
   getInvoiceByCorrelationId,
   updateInvoiceFromWebhook,

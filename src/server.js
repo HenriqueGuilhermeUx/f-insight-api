@@ -64,7 +64,12 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(morgan('combined'));
-app.use(express.json({ limit: '8mb' }));
+app.use(express.json({
+  limit: '8mb',
+  verify(req, _res, buf) {
+    req.rawBody = Buffer.from(buf);
+  },
+}));
 
 app.use('/api/stocks', stockRoutes);
 app.use('/api/crypto', cryptoRoutes);
