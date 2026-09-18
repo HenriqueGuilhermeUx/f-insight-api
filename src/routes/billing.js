@@ -3,10 +3,12 @@ const router = express.Router();
 const {
   PLANS,
   isWooviConfigured,
+  billingPersistenceMode,
   createWooviCharge,
   getInvoiceByCorrelationId,
   updateInvoiceFromWebhook,
 } = require('../services/wooviBillingService');
+const { verifyWooviWebhook } = require('../services/wooviWebhookVerifier');
 
 function publicInvoice(invoice) {
   if (!invoice) return null;
@@ -29,10 +31,11 @@ function publicInvoice(invoice) {
   };
 }
 
-router.get('/plans', (req, res) => {
+router.get('/plans', (_req, res) => {
   res.json({
     provider: 'woovi',
     wooviConfigured: isWooviConfigured(),
+    persistence: billingPersistenceMode(),
     plans: Object.values(PLANS),
   });
 });
@@ -60,7 +63,6 @@ router.post('/checkout', async (req, res) => {
       ok: false,
       error: 'Falha ao gerar cobrança',
       message: error.response?.data?.message || error.message,
-      providerData: error.response?.data,
     });
   }
 });
@@ -71,17 +73,26 @@ router.get('/invoice/:correlationId', async (req, res) => {
     if (!invoice) return res.status(404).json({ ok: false, error: 'Cobrança não encontrada' });
     return res.json({ ok: true, invoice: publicInvoice(invoice) });
   } catch (error) {
-    res.status(500).json({ ok: false, error: 'Falha ao consultar cobrança', message: error.message });
+    return res.status(500).json({ ok: false, error: 'Falha ao consultar cobrança', message: error.message });
   }
 });
 
 router.post('/webhooks/woovi', async (req, res) => {
   try {
+    const signature = req.get('x-webhook-signature');
+    const valid = await verifyWooviWebhook({ rawBody: req.rawBody, signature });
+    if (!valid) {
+      return res.status(401).json({ ok: false, error: 'Invalid webhook signature' });
+    }
+
     const result = await updateInvoiceFromWebhook(req.body);
-    res.json({ ok: true, result });
+    if (!result.ok) {
+      return res.status(500).json({ ok: false, error: 'Webhook persistence failed' });
+    }
+    return res.json({ ok: true, result });
   } catch (error) {
     console.error('Woovi webhook failed:', error.message);
-    res.status(500).json({ ok: false, error: 'Webhook failed', message: error.message });
+    return res.status(503).json({ ok: false, error: 'Webhook verification unavailable' });
   }
 });
 
