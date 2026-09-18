@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - ci/production-smoke
+      - ci/shared-supabase-persistence-smoke
   workflow_dispatch:
 
 permissions:
@@ -45,12 +46,75 @@ jobs:
 
           request_until_ok "/api/watchlist/_health/storage" /tmp/storage.json
           grep -q '"service":"user-market-preferences"' /tmp/storage.json
+          grep -q '"storageMode":"dedicated-data-supabase-with-memory-fallback"' /tmp/storage.json
 
           request_until_ok "/api/live/indicators" /tmp/indicators.json
           node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('/tmp/indicators.json')); if (!Array.isArray(j.data) || j.data.length < 1) { console.error(j); process.exit(1) } console.log('indicator source:', j.source, 'count:', j.data.length)"
 
           request_until_ok "/api/news" /tmp/news.json
           node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('/tmp/news.json')); if (!Array.isArray(j)) { console.error(j); process.exit(1) } console.log('news count:', j.length)"
+
+      - name: Verify production watchlist and alert persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE="https://f-insight-api.onrender.com"
+          USER_ID="ci-persistence-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ALERT_ID=""
+
+          cleanup() {
+            curl --silent --show-error --max-time 25 -X DELETE "$BASE/api/watchlist/$USER_ID/PETR4" >/dev/null || true
+            if [ -n "$ALERT_ID" ]; then
+              curl --silent --show-error --max-time 25 -X DELETE "$BASE/api/alerts/$ALERT_ID" >/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          curl --fail --silent --show-error --max-time 25 \
+            -H 'Content-Type: application/json' \
+            -d '{"ticker":"PETR4","name":"Petrobras","type":"stock"}' \
+            "$BASE/api/watchlist/$USER_ID" > /tmp/watchlist-create.json
+
+          grep -q 'PETR4' /tmp/watchlist-create.json
+
+          curl --fail --silent --show-error --max-time 25 \
+            "$BASE/api/watchlist/$USER_ID" > /tmp/watchlist-read.json
+
+          grep -q 'PETR4' /tmp/watchlist-read.json
+
+          curl --fail --silent --show-error --max-time 25 \
+            -H 'Content-Type: application/json' \
+            -d "{\"userId\":\"$USER_ID\",\"ticker\":\"PETR4\",\"type\":\"price_below\",\"value\":30.5}" \
+            "$BASE/api/alerts" > /tmp/alert-create.json
+
+          ALERT_ID=$(node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/alert-create.json')); if (!j.alert?.id) process.exit(1); process.stdout.write(String(j.alert.id));")
+
+          curl --fail --silent --show-error --max-time 25 \
+            "$BASE/api/alerts/$USER_ID" > /tmp/alerts-read.json
+
+          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/alerts-read.json')); if (!Array.isArray(j) || !j.some(x => x.id === process.argv[1] && x.ticker === 'PETR4')) { console.error(j); process.exit(1) }" "$ALERT_ID"
+
+          curl --fail --silent --show-error --max-time 25 \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"enabled":false,"value":29.75}' \
+            "$BASE/api/alerts/$ALERT_ID" > /tmp/alert-update.json
+
+          grep -q '"enabled":false' /tmp/alert-update.json
+
+          cleanup
+          trap - EXIT
+
+          curl --fail --silent --show-error --max-time 25 \
+            "$BASE/api/watchlist/$USER_ID" > /tmp/watchlist-after-delete.json
+
+          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/watchlist-after-delete.json')); if (!Array.isArray(j) || j.some(x => x.ticker === 'PETR4')) { console.error(j); process.exit(1) }"
+
+          curl --fail --silent --show-error --max-time 25 \
+            "$BASE/api/alerts/$USER_ID" > /tmp/alerts-after-delete.json
+
+          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/alerts-after-delete.json')); if (!Array.isArray(j) || j.length !== 0) { console.error(j); process.exit(1) }"
 
       - name: Verify production custom-domain CORS
         shell: bash
