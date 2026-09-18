@@ -1,6 +1,6 @@
 'use strict';
 
-const { supabase, isSupabaseEnabled } = require('./supabaseClient');
+const { dataSupabase: supabase, isDataSupabaseEnabled: isSupabaseEnabled, dataSupabaseMode } = require('./dataSupabaseClient');
 
 const WATCHLIST_TABLE = 'finsight_watchlist_items';
 const ALERTS_TABLE = 'finsight_price_alerts';
@@ -279,7 +279,7 @@ async function deleteAlert(alertIdInput) {
 }
 
 function storageMode() {
-  return isSupabaseEnabled() ? 'supabase-with-memory-fallback' : 'memory-fallback';
+  return isSupabaseEnabled() ? `${dataSupabaseMode()}-with-memory-fallback` : 'memory-fallback';
 }
 
 function resetMemoryForTests() {

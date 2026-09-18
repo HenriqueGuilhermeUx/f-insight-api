@@ -29,6 +29,8 @@ jobs:
       - name: Syntax validation
         run: |
           node --check src/server.js
+          node --check src/services/dataSupabaseClient.js
+          node --check src/services/userMarketPreferencesStore.js
           node --check src/services/liveDataService.js
           node --check src/routes/live.js
           node --check scripts/testLiveDataResilience.js

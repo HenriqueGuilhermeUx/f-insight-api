@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { supabase, isSupabaseEnabled } = require('./supabaseClient');
+const { dataSupabase: supabase, isDataSupabaseEnabled: isSupabaseEnabled } = require('./dataSupabaseClient');
 const { refreshMacroData, getMacroData } = require('./macroService');
 
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
