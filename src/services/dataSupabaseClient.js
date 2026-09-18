@@ -1,14 +1,17 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const DATA_SUPABASE_URL =
-  process.env.FINSIGHT_DATA_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  process.env.VITE_SUPABASE_URL;
+const hasDedicatedPair = Boolean(
+  process.env.FINSIGHT_DATA_SUPABASE_URL &&
+  process.env.FINSIGHT_DATA_SUPABASE_SERVICE_ROLE_KEY
+);
 
-const DATA_SUPABASE_SERVICE_ROLE_KEY =
-  process.env.FINSIGHT_DATA_SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SERVICE_KEY;
+const DATA_SUPABASE_URL = hasDedicatedPair
+  ? process.env.FINSIGHT_DATA_SUPABASE_URL
+  : process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+
+const DATA_SUPABASE_SERVICE_ROLE_KEY = hasDedicatedPair
+  ? process.env.FINSIGHT_DATA_SUPABASE_SERVICE_ROLE_KEY
+  : process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
 let dataSupabase = null;
 
@@ -30,7 +33,7 @@ function isDataSupabaseEnabled() {
 }
 
 function dataSupabaseMode() {
-  if (process.env.FINSIGHT_DATA_SUPABASE_URL && process.env.FINSIGHT_DATA_SUPABASE_SERVICE_ROLE_KEY) {
+  if (hasDedicatedPair) {
     return 'dedicated-data-supabase';
   }
   if (dataSupabase) return 'legacy-supabase-env';
