@@ -6,6 +6,7 @@ on:
       - main
       - ci/production-smoke
       - ci/shared-supabase-persistence-smoke
+      - ci/market-universe-smoke
   workflow_dispatch:
 
 permissions:
@@ -53,6 +54,34 @@ jobs:
 
           request_until_ok "/api/news" /tmp/news.json
           node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('/tmp/news.json')); if (!Array.isArray(j)) { console.error(j); process.exit(1) } console.log('news count:', j.length)"
+
+      - name: Verify production market universe beyond default B3 symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://f-insight-api.onrender.com"
+
+          curl --fail --silent --show-error --max-time 40 \
+            "$BASE/api/live/indicators?symbols=AAPL%2CBTC-USD%2CIVVB11.SA%2CHGLG11.SA" \
+            > /tmp/market-universe.json
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const payload = JSON.parse(fs.readFileSync('/tmp/market-universe.json', 'utf8'));
+          if (!Array.isArray(payload.data)) {
+            console.error(payload);
+            process.exit(1);
+          }
+          const symbols = new Set(payload.data.map((row) => String(row.symbol || '').toUpperCase()));
+          for (const required of ['AAPL', 'BTC-USD']) {
+            if (!symbols.has(required)) {
+              console.error('Missing required live symbol:', required, payload);
+              process.exit(1);
+            }
+          }
+          console.log('market universe source:', payload.source);
+          console.log('market universe symbols:', [...symbols].join(', '));
+          NODE
 
       - name: Verify production watchlist and alert persistence
         shell: bash
