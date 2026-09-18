@@ -8,6 +8,7 @@ const {
 const WOOVI_BASE_URL = (process.env.WOOVI_BASE_URL || 'https://api.woovi.com').replace(/\/$/, '');
 const WOOVI_API_KEY = process.env.WOOVI_API_KEY || process.env.WOOVI_APP_ID || process.env.OPENPIX_APP_ID;
 const APP_URL = process.env.APP_URL || process.env.FRONTEND_URL || 'https://f-insight.org';
+const INDIVIDUAL_ACCESS_DAYS = Number(process.env.BILLING_INDIVIDUAL_ACCESS_DAYS || 30);
 
 const PLANS = {
   individual: {
@@ -54,6 +55,16 @@ function requirePlan(planId) {
     throw error;
   }
   return plan;
+}
+
+function requireAccountId(accountId) {
+  const normalized = String(accountId || '').trim();
+  if (!normalized) {
+    const error = new Error('Conta obrigatória.');
+    error.statusCode = 400;
+    throw error;
+  }
+  return normalized;
 }
 
 function isWooviConfigured() {
@@ -222,6 +233,51 @@ async function getInvoiceByCorrelationId(correlationId) {
   }
 }
 
+async function getIndividualEntitlement(accountId) {
+  const tenantId = requireAccountId(accountId);
+
+  if (!isSupabaseEnabled()) {
+    return { active: false, plan: 'free', paidAt: null, expiresAt: null, correlationId: null };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('billing_invoices')
+      .select('correlation_id,status,paid_at,created_at')
+      .eq('tenant_id', tenantId)
+      .eq('plan_id', 'individual')
+      .eq('status', 'paid')
+      .order('paid_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) {
+      return { active: false, plan: 'free', paidAt: null, expiresAt: null, correlationId: null };
+    }
+
+    const paidAt = data.paid_at || data.created_at;
+    const paidAtMs = Date.parse(paidAt || '');
+    if (!Number.isFinite(paidAtMs)) {
+      return { active: false, plan: 'free', paidAt: null, expiresAt: null, correlationId: data.correlation_id };
+    }
+
+    const expiresAtMs = paidAtMs + INDIVIDUAL_ACCESS_DAYS * 24 * 60 * 60 * 1000;
+    const active = Date.now() < expiresAtMs;
+
+    return {
+      active,
+      plan: active ? 'premium' : 'free',
+      paidAt: new Date(paidAtMs).toISOString(),
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      correlationId: data.correlation_id,
+    };
+  } catch (error) {
+    console.warn('Billing entitlement lookup failed:', error.message);
+    throw error;
+  }
+}
+
 async function updateInvoiceFromWebhook(payload) {
   if (!isSupabaseEnabled()) return { ok: false, error: 'Billing persistence disabled' };
 
@@ -259,5 +315,6 @@ module.exports = {
   billingPersistenceMode,
   createWooviCharge,
   getInvoiceByCorrelationId,
+  getIndividualEntitlement,
   updateInvoiceFromWebhook,
 };

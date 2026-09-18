@@ -7,6 +7,7 @@ on:
       - ci/production-smoke
       - ci/shared-supabase-persistence-smoke
       - ci/market-universe-smoke
+      - release/premium-entitlement
   workflow_dispatch:
 
 permissions:
@@ -55,7 +56,7 @@ jobs:
           request_until_ok "/api/news" /tmp/news.json
           node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('/tmp/news.json')); if (!Array.isArray(j)) { console.error(j); process.exit(1) } console.log('news count:', j.length)"
 
-      - name: Verify production billing persistence and webhook protection
+      - name: Verify production billing persistence, entitlement and webhook protection
         shell: bash
         run: |
           set -euo pipefail
@@ -63,16 +64,26 @@ jobs:
 
           for attempt in {1..30}; do
             code=$(curl --silent --show-error --max-time 25 -o /tmp/billing-plans.json -w "%{http_code}" "$BASE/api/billing/plans" || true)
-            if [ "$code" = "200" ] && grep -q '"persistence":"dedicated-data-supabase"' /tmp/billing-plans.json; then
+            if [ "$code" = "200" ] \
+              && grep -q '"persistence":"dedicated-data-supabase"' /tmp/billing-plans.json \
+              && grep -q '"id":"individual"' /tmp/billing-plans.json; then
               break
             fi
-            echo "attempt $attempt: waiting for billing data-hub deployment (HTTP $code)"
+            echo "attempt $attempt: waiting for billing/entitlement deployment (HTTP $code)"
             sleep 5
           done
 
           grep -q '"provider":"woovi"' /tmp/billing-plans.json
           grep -q '"persistence":"dedicated-data-supabase"' /tmp/billing-plans.json
-          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/billing-plans.json')); console.log('Woovi configured:', Boolean(j.wooviConfigured), 'plans:', j.plans?.length || 0)"
+          grep -q '"id":"individual"' /tmp/billing-plans.json
+          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/billing-plans.json')); const individual=j.plans?.find(x=>x.id==='individual'); if (!individual || individual.priceCents !== 1990) { console.error(j); process.exit(1) } console.log('Woovi configured:', Boolean(j.wooviConfigured), 'individual cents:', individual.priceCents)"
+
+          curl --fail --silent --show-error --max-time 25 \
+            -H 'Content-Type: application/json' \
+            -d '{"accountId":"ci-entitlement-no-paid-invoice"}' \
+            "$BASE/api/billing/entitlement" > /tmp/entitlement.json
+
+          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/entitlement.json')); if (!j.ok || j.entitlement?.active !== false || j.entitlement?.plan !== 'free') { console.error(j); process.exit(1) }"
 
           webhook_code=$(curl --silent --show-error --max-time 25 -o /tmp/webhook-reject.json -w "%{http_code}" \
             -H 'Content-Type: application/json' \

@@ -6,6 +6,7 @@ const {
   billingPersistenceMode,
   createWooviCharge,
   getInvoiceByCorrelationId,
+  getIndividualEntitlement,
   updateInvoiceFromWebhook,
 } = require('../services/wooviBillingService');
 const { verifyWooviWebhook } = require('../services/wooviWebhookVerifier');
@@ -63,6 +64,19 @@ router.post('/checkout', async (req, res) => {
       ok: false,
       error: 'Falha ao gerar cobrança',
       message: error.response?.data?.message || error.message,
+    });
+  }
+});
+
+router.post('/entitlement', async (req, res) => {
+  try {
+    const entitlement = await getIndividualEntitlement(req.body?.accountId);
+    return res.json({ ok: true, entitlement });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      ok: false,
+      error: 'Falha ao consultar acesso',
+      message: error.message,
     });
   }
 });
