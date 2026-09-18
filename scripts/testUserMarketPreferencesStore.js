@@ -10,6 +10,7 @@ async function main() {
   store.resetMemoryForTests();
 
   const userId = 'ci-user@example.com';
+  const otherUserId = 'other-user@example.com';
   let watchlist = await store.getWatchlist(userId);
   assert(Array.isArray(watchlist) && watchlist.length === 0, 'watchlist should start empty');
 
@@ -40,11 +41,17 @@ async function main() {
   const alerts = await store.getAlerts(userId);
   assert(alerts.length === 1, 'one alert should exist');
 
-  const updated = await store.updateAlert(alert.id, { enabled: false, value: 54.5 });
+  const forbiddenUpdate = await store.updateAlert(otherUserId, alert.id, { enabled: false });
+  assert(forbiddenUpdate === null, 'another user must not update the alert');
+
+  const updated = await store.updateAlert(userId, alert.id, { enabled: false, value: 54.5 });
   assert(updated && updated.enabled === false, 'alert should disable');
   assert(updated.value === 54.5, 'alert value should update');
 
-  const deleted = await store.deleteAlert(alert.id);
+  const forbiddenDelete = await store.deleteAlert(otherUserId, alert.id);
+  assert(forbiddenDelete === false, 'another user must not delete the alert');
+
+  const deleted = await store.deleteAlert(userId, alert.id);
   assert(deleted === true, 'alert should delete');
   assert((await store.getAlerts(userId)).length === 0, 'alerts should be empty after delete');
 
@@ -53,6 +60,7 @@ async function main() {
     storageMode: store.storageMode(),
     watchlistCompatibility: true,
     alertsCompatibility: true,
+    ownershipEnforced: true,
   }, null, 2));
 }
 
