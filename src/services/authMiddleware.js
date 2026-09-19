@@ -15,6 +15,11 @@ function normalizeRole(user) {
   return 'client';
 }
 
+function normalizeTenantId(user) {
+  const tenantId = user?.app_metadata?.tenant_id;
+  return tenantId ? String(tenantId) : null;
+}
+
 async function requireAuthenticatedUser(req, res, next) {
   if (!isDataSupabaseEnabled() || !dataSupabase) {
     return res.status(503).json({ ok: false, error: 'AUTH_BACKEND_UNAVAILABLE' });
@@ -35,6 +40,7 @@ async function requireAuthenticatedUser(req, res, next) {
       id: data.user.id,
       email: data.user.email || null,
       role: normalizeRole(data.user),
+      tenantId: normalizeTenantId(data.user),
     };
     return next();
   } catch (error) {
@@ -55,6 +61,7 @@ function requireRoles(...roles) {
 module.exports = {
   extractBearerToken,
   normalizeRole,
+  normalizeTenantId,
   requireAuthenticatedUser,
   requireRoles,
 };
