@@ -9,6 +9,8 @@ const WOOVI_BASE_URL = (process.env.WOOVI_BASE_URL || 'https://api.woovi.com').r
 const WOOVI_API_KEY = process.env.WOOVI_API_KEY || process.env.WOOVI_APP_ID || process.env.OPENPIX_APP_ID;
 const APP_URL = process.env.APP_URL || process.env.FRONTEND_URL || 'https://f-insight.org';
 const INDIVIDUAL_ACCESS_DAYS = Number(process.env.BILLING_INDIVIDUAL_ACCESS_DAYS || 30);
+const OFFICE_ACCESS_DAYS = Number(process.env.BILLING_OFFICE_ACCESS_DAYS || 30);
+const OFFICE_TRIAL_DAYS = Number(process.env.BILLING_OFFICE_TRIAL_DAYS || 7);
 
 const PLANS = {
   individual: {
@@ -96,6 +98,12 @@ function getQrCode(charge) {
 
 function getBrCode(charge) {
   return charge.brCode || charge.pixCode || charge.copyPaste || null;
+}
+
+function addDaysIso(source, days) {
+  const sourceMs = Date.parse(source || '');
+  if (!Number.isFinite(sourceMs)) return null;
+  return new Date(sourceMs + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
 async function persistInvoice(invoice) {
@@ -257,23 +265,101 @@ async function getIndividualEntitlement(accountId) {
     }
 
     const paidAt = data.paid_at || data.created_at;
-    const paidAtMs = Date.parse(paidAt || '');
-    if (!Number.isFinite(paidAtMs)) {
+    const expiresAt = addDaysIso(paidAt, INDIVIDUAL_ACCESS_DAYS);
+    if (!expiresAt) {
       return { active: false, plan: 'free', paidAt: null, expiresAt: null, correlationId: data.correlation_id };
     }
 
-    const expiresAtMs = paidAtMs + INDIVIDUAL_ACCESS_DAYS * 24 * 60 * 60 * 1000;
-    const active = Date.now() < expiresAtMs;
-
+    const active = Date.now() < Date.parse(expiresAt);
     return {
       active,
       plan: active ? 'premium' : 'free',
-      paidAt: new Date(paidAtMs).toISOString(),
-      expiresAt: new Date(expiresAtMs).toISOString(),
+      paidAt: new Date(Date.parse(paidAt)).toISOString(),
+      expiresAt,
       correlationId: data.correlation_id,
     };
   } catch (error) {
     console.warn('Billing entitlement lookup failed:', error.message);
+    throw error;
+  }
+}
+
+async function getOfficeEntitlement(tenantIdInput) {
+  const tenantId = requireAccountId(tenantIdInput);
+
+  if (!isSupabaseEnabled()) {
+    return {
+      active: false,
+      status: 'unavailable',
+      plan: null,
+      paidAt: null,
+      expiresAt: null,
+      trialEndsAt: null,
+      correlationId: null,
+    };
+  }
+
+  try {
+    const [tenantResult, invoiceResult] = await Promise.all([
+      supabase
+        .from('finsight_tenants')
+        .select('created_at')
+        .eq('id', tenantId)
+        .maybeSingle(),
+      supabase
+        .from('billing_invoices')
+        .select('plan_id,correlation_id,paid_at,created_at')
+        .eq('tenant_id', tenantId)
+        .in('plan_id', ['basic', 'pro', 'premium'])
+        .eq('status', 'paid')
+        .order('paid_at', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    if (tenantResult.error) throw tenantResult.error;
+    if (invoiceResult.error) throw invoiceResult.error;
+    if (!tenantResult.data?.created_at) {
+      return {
+        active: false,
+        status: 'no_tenant',
+        plan: null,
+        paidAt: null,
+        expiresAt: null,
+        trialEndsAt: null,
+        correlationId: null,
+      };
+    }
+
+    const invoice = invoiceResult.data;
+    if (invoice) {
+      const paidAt = invoice.paid_at || invoice.created_at;
+      const expiresAt = addDaysIso(paidAt, OFFICE_ACCESS_DAYS);
+      const active = Boolean(expiresAt && Date.now() < Date.parse(expiresAt));
+      return {
+        active,
+        status: active ? 'paid' : 'expired',
+        plan: active ? invoice.plan_id : null,
+        paidAt: paidAt ? new Date(Date.parse(paidAt)).toISOString() : null,
+        expiresAt,
+        trialEndsAt: null,
+        correlationId: invoice.correlation_id,
+      };
+    }
+
+    const trialEndsAt = addDaysIso(tenantResult.data.created_at, OFFICE_TRIAL_DAYS);
+    const trialActive = Boolean(trialEndsAt && Date.now() < Date.parse(trialEndsAt));
+    return {
+      active: trialActive,
+      status: trialActive ? 'trial' : 'trial_expired',
+      plan: trialActive ? 'trial' : null,
+      paidAt: null,
+      expiresAt: trialEndsAt,
+      trialEndsAt,
+      correlationId: null,
+    };
+  } catch (error) {
+    console.warn('Office billing entitlement lookup failed:', error.message);
     throw error;
   }
 }
@@ -316,5 +402,6 @@ module.exports = {
   createWooviCharge,
   getInvoiceByCorrelationId,
   getIndividualEntitlement,
+  getOfficeEntitlement,
   updateInvoiceFromWebhook,
 };
