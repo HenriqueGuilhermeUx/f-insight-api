@@ -37,6 +37,10 @@ function invoiceTenantId(invoice) {
   return String(invoice?.tenant_id || invoice?.tenantId || '');
 }
 
+function invoicePlanId(invoice) {
+  return String(invoice?.plan_id || invoice?.planId || '');
+}
+
 router.get('/plans', (_req, res) => {
   res.json({
     provider: 'woovi',
@@ -55,8 +59,12 @@ router.post('/checkout', requireAuthenticatedUser, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'FORBIDDEN_BILLING_PLAN' });
     }
 
+    if (!isIndividual && !req.authUser.tenantId) {
+      return res.status(403).json({ ok: false, error: 'TENANT_MEMBERSHIP_REQUIRED' });
+    }
+
     const invoice = await createWooviCharge({
-      tenantId: isIndividual ? req.authUser.id : req.body?.tenantId,
+      tenantId: isIndividual ? req.authUser.id : req.authUser.tenantId,
       planId,
       customerName: req.body?.customerName,
       customerEmail: isIndividual ? req.authUser.email : req.body?.customerEmail,
@@ -98,8 +106,12 @@ router.get('/invoice/:correlationId', requireAuthenticatedUser, async (req, res)
     const invoice = await getInvoiceByCorrelationId(req.params.correlationId);
     if (!invoice) return res.status(404).json({ ok: false, error: 'Cobrança não encontrada' });
 
-    const ownsInvoice = invoiceTenantId(invoice) === req.authUser.id;
-    if (!ownsInvoice && req.authUser.role !== 'admin') {
+    const ownerId = invoicePlanId(invoice) === 'individual'
+      ? req.authUser.id
+      : req.authUser.tenantId;
+    const ownsInvoice = Boolean(ownerId) && invoiceTenantId(invoice) === String(ownerId);
+
+    if (!ownsInvoice) {
       return res.status(404).json({ ok: false, error: 'Cobrança não encontrada' });
     }
 
