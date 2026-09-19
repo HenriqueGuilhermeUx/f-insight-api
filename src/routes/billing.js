@@ -7,6 +7,7 @@ const {
   createWooviCharge,
   getInvoiceByCorrelationId,
   getIndividualEntitlement,
+  getOfficeEntitlement,
   updateInvoiceFromWebhook,
 } = require('../services/wooviBillingService');
 const { verifyWooviWebhook } = require('../services/wooviWebhookVerifier');
@@ -90,8 +91,18 @@ router.post('/checkout', requireAuthenticatedUser, async (req, res) => {
 
 router.post('/entitlement', requireAuthenticatedUser, async (req, res) => {
   try {
-    const entitlement = await getIndividualEntitlement(req.authUser.id);
-    return res.json({ ok: true, entitlement });
+    const individual = await getIndividualEntitlement(req.authUser.id);
+    const office = req.authUser.tenantId
+      ? await getOfficeEntitlement(req.authUser.tenantId)
+      : null;
+
+    return res.json({
+      ok: true,
+      entitlement: {
+        ...individual,
+        office,
+      },
+    });
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       ok: false,
