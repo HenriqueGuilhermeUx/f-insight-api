@@ -19,6 +19,7 @@ const billingRoutes = require('./routes/billing');
 const automationRoutes = require('./routes/automation');
 const finsightAgentRoutes = require('./routes/finsightAgent');
 const toolsRoutes = require('./routes/tools');
+const nexofficeInformationRoutes = require('./routes/nexofficeInformation');
 const internalMarketTerminalRoutes = require('./routes/internalMarketTerminal');
 const internalAdvisorIntelligenceRoutes = require('./routes/internalAdvisorIntelligence');
 const { startCronJobs } = require('./services/cronService');
@@ -58,7 +59,7 @@ const corsOptions = {
     return callback(new Error(`CORS blocked origin: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-FInsight-Internal-Key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-FInsight-Internal-Key', 'X-NexOffice-Key', 'X-NexOffice-Workspace-ID'],
 };
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
@@ -87,6 +88,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/automation', automationRoutes);
 app.use('/api/agent', finsightAgentRoutes);
 app.use('/api/tools', toolsRoutes);
+app.use('/api/internal/nexoffice', nexofficeInformationRoutes);
 
 const internalMarketTerminalEnabled = process.env.INTERNAL_MARKET_TERMINAL_ENABLED === 'true';
 const internalAdvisorIntelligenceEnabled = process.env.INTERNAL_ADVISOR_INTELLIGENCE_ENABLED === 'true';
@@ -101,12 +103,13 @@ app.get('/', (req, res) => {
   res.json({
     name: 'F-Insight API',
     status: 'ok',
-    version: '1.8.0',
+    version: '1.9.0',
     supabase: isSupabaseEnabled(),
     cors: { netlifyAllowed: true, configuredOrigins: allowedOrigins },
+    nexofficeInformationBridge: process.env.NEXOFFICE_INFORMATION_BRIDGE_ENABLED === 'true' ? 'enabled-guarded' : 'disabled',
     internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
     internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled',
-    modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing', 'automation-bridge', 'finsight-agent', 'educational-calculators']
+    modules: ['market-data', 'macro-context', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing', 'automation-bridge', 'finsight-agent', 'educational-calculators', 'nexoffice-information-bridge']
   });
 });
 
@@ -114,11 +117,12 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.8.0',
+    version: '1.9.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled',
     agent: 'enabled',
     calculators: 'educational-no-recommendation',
+    nexofficeInformationBridge: process.env.NEXOFFICE_INFORMATION_BRIDGE_ENABLED === 'true' ? 'enabled-guarded' : 'disabled',
     internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
     internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled'
   });
@@ -128,11 +132,12 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.8.0',
+    version: '1.9.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled',
     agent: 'enabled',
     calculators: 'educational-no-recommendation',
+    nexofficeInformationBridge: process.env.NEXOFFICE_INFORMATION_BRIDGE_ENABLED === 'true' ? 'enabled-guarded' : 'disabled',
     internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
     internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled'
   });
