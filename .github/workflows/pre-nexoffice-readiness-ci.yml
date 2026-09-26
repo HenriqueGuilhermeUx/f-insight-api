@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm ci
+      - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Syntax check
         run: node --check src/routes/live.js && node --check src/routes/stocks.js && node --check src/routes/reports.js && node --check src/routes/tools.js && node --check src/services/financialCalculators.js && node --check src/server.js
       - name: Educational calculator tests
