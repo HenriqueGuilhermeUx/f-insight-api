@@ -8,6 +8,7 @@ on:
       - 'src/routes/reports.js'
       - 'src/routes/tools.js'
       - 'src/services/financialCalculators.js'
+      - 'src/services/macroService.js'
       - 'src/server.js'
       - 'scripts/testEducationalCalculators.js'
       - '.github/workflows/pre-nexoffice-readiness-ci.yml'
@@ -26,7 +27,7 @@ jobs:
           node-version: 22
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Syntax check
-        run: node --check src/routes/live.js && node --check src/routes/stocks.js && node --check src/routes/reports.js && node --check src/routes/tools.js && node --check src/services/financialCalculators.js && node --check src/server.js
+        run: node --check src/routes/live.js && node --check src/routes/stocks.js && node --check src/routes/reports.js && node --check src/routes/tools.js && node --check src/services/financialCalculators.js && node --check src/services/macroService.js && node --check src/server.js
       - name: Educational calculator tests
         run: node scripts/testEducationalCalculators.js
       - name: Market freshness contract guard
@@ -38,6 +39,17 @@ jobs:
           grep -q 'providerTimestamp' src/routes/stocks.js
           if grep -n 'data.t || Date.now' src/routes/stocks.js; then
             echo 'Provider timestamp must never fall back to response time.'
+            exit 1
+          fi
+      - name: Macro integrity guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'observations' src/services/macroService.js
+          grep -q "source: 'unavailable'" src/services/macroService.js
+          grep -q 'signals: \[\]' src/services/macroService.js
+          if grep -nE 'fallbackMacro|fallback-offline|suggestedAction|buildSignals|aumentar exposição|atratividade relativa' src/services/macroService.js; then
+            echo 'Macro service must not fabricate current values or generate allocation/recommendation signals.'
             exit 1
           fi
       - name: Valuation report integrity guard
