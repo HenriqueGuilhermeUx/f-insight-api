@@ -1,0 +1,49 @@
+name: NexOffice Information Bridge V1
+
+on:
+  pull_request:
+    paths:
+      - 'src/routes/nexofficeInformation.js'
+      - 'src/services/macroService.js'
+      - 'src/services/financialCalculators.js'
+      - 'src/services/liveDataService.js'
+      - 'src/server.js'
+      - 'scripts/testNexOfficeInformationBridge.js'
+      - '.github/workflows/nexoffice-information-bridge-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Syntax check
+        run: node --check src/routes/nexofficeInformation.js && node --check src/services/macroService.js && node --check src/services/financialCalculators.js && node --check src/server.js
+      - name: Bridge policy and capability contract
+        run: node scripts/testNexOfficeInformationBridge.js
+      - name: Educational calculator regression
+        run: node scripts/testEducationalCalculators.js
+      - name: Hard boundary guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "NEXOFFICE_INFORMATION_BRIDGE_ENABLED !== 'true'" src/routes/nexofficeInformation.js
+          grep -q 'FINSIGHT_NEXOFFICE_SERVICE_KEY' src/routes/nexofficeInformation.js
+          grep -q 'recommendation: false' src/routes/nexofficeInformation.js
+          grep -q 'execution: false' src/routes/nexofficeInformation.js
+          grep -q 'advisorClientData: false' src/routes/nexofficeInformation.js
+          if grep -nE "require\(.+(allocationSignals|quantLab|strategyEngine|optionsAnalytics|Advisor|advisorClient)" src/routes/nexofficeInformation.js; then
+            echo 'NexOffice information bridge imported a prohibited recommendation/quant/professional capability.'
+            exit 1
+          fi
+          if grep -nE "router\.(get|post|put|patch|delete)\(.+/(signals|orders|execute|portfolio|advisor|clients|quant)" src/routes/nexofficeInformation.js; then
+            echo 'NexOffice information bridge exposed a prohibited endpoint.'
+            exit 1
+          fi
