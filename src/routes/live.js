@@ -23,6 +23,28 @@ function mapIndicatorRow(row) {
   };
 }
 
+function freshness(data = []) {
+  const times = data
+    .map((item) => new Date(item?.fetchedAt || 0).getTime())
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const latest = times.length ? Math.max(...times) : null;
+  return {
+    responseAt: new Date().toISOString(),
+    dataUpdatedAt: latest ? new Date(latest).toISOString() : null,
+    dataAgeSeconds: latest ? Math.max(0, Math.floor((Date.now() - latest) / 1000)) : null,
+  };
+}
+
+function indicatorResponse(source, data, extra = {}) {
+  return {
+    source,
+    count: data.length,
+    ...freshness(data),
+    ...extra,
+    data,
+  };
+}
+
 router.get('/status', async (req, res) => {
   try {
     res.json(await getLiveStatus());
@@ -45,54 +67,54 @@ router.get('/indicators', async (req, res) => {
         .select('symbol,provider,last_price,change,change_percent,avg_volume,candles,fetched_at')
         .order('fetched_at', { ascending: false });
 
-      if (symbols.length > 0) {
-        query = query.in('symbol', symbols);
-      }
+      if (symbols.length > 0) query = query.in('symbol', symbols);
 
       const { data, error } = await query;
       if (error) throw error;
 
       const unique = Array.from(
         new Map((data || []).map((row) => [row.symbol, mapIndicatorRow(row)])).values()
-      );
+      ).filter((item) => Number.isFinite(item.lastPrice) && item.lastPrice > 0);
 
       if (unique.length > 0) {
-        return res.json({
-          source: 'supabase-cache',
-          count: unique.length,
-          updatedAt: new Date().toISOString(),
-          data: unique,
-        });
+        return res.json(indicatorResponse('supabase-cache', unique));
       }
     } catch (error) {
       console.warn('Supabase indicator cache unavailable; falling back to runtime/provider data:', error.message);
     }
   }
 
-  const cached = getCachedIndicators(symbols);
+  const cached = getCachedIndicators(symbols).filter(
+    (item) => Number.isFinite(Number(item?.lastPrice)) && Number(item.lastPrice) > 0
+  );
   if (cached.length > 0) {
-    return res.json({
-      source: 'runtime-cache',
-      count: cached.length,
-      updatedAt: new Date().toISOString(),
-      data: cached,
-    });
+    return res.json(indicatorResponse('runtime-cache', cached));
   }
 
   try {
     const refreshed = await refreshIndicators(symbols.length > 0 ? symbols : DEFAULT_SYMBOLS);
-    return res.json({
-      source: 'provider-refresh',
-      count: refreshed.data.length,
-      updatedAt: new Date().toISOString(),
-      failures: refreshed.failures,
-      data: refreshed.data,
-    });
+    const valid = (refreshed.data || []).filter(
+      (item) => Number.isFinite(Number(item?.lastPrice)) && Number(item.lastPrice) > 0
+    );
+    if (valid.length === 0) {
+      return res.status(503).json({
+        error: 'Live indicator providers unavailable',
+        source: 'provider-refresh',
+        failures: refreshed.failures || [],
+        ...freshness([]),
+        data: [],
+      });
+    }
+    return res.json(indicatorResponse('provider-refresh', valid, {
+      failures: refreshed.failures || [],
+      degraded: Boolean(refreshed.failures?.length),
+    }));
   } catch (error) {
     console.error('Live indicators failed:', error.message);
     return res.status(503).json({
       error: 'Live indicator providers unavailable',
       message: error.message,
+      ...freshness([]),
       data: [],
     });
   }
@@ -131,7 +153,9 @@ router.post('/refresh/news', async (req, res) => {
 router.post('/refresh/indicators', async (req, res) => {
   try {
     const symbols = Array.isArray(req.body?.symbols) ? req.body.symbols : DEFAULT_SYMBOLS;
-    res.json(await refreshIndicators(symbols));
+    const result = await refreshIndicators(symbols);
+    if (!result.data?.length) return res.status(503).json({ ...result, ok: false });
+    res.json({ ...result, degraded: Boolean(result.failures?.length) });
   } catch (error) {
     console.error('Manual indicators refresh failed:', error.message);
     res.status(500).json({ error: 'Failed to refresh indicators' });

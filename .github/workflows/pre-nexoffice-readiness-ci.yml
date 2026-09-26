@@ -1,0 +1,72 @@
+name: Pre NexOffice Readiness CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/routes/live.js'
+      - 'src/routes/stocks.js'
+      - 'src/routes/reports.js'
+      - 'src/routes/tools.js'
+      - 'src/services/financialCalculators.js'
+      - 'src/services/macroService.js'
+      - 'src/server.js'
+      - 'scripts/testEducationalCalculators.js'
+      - '.github/workflows/pre-nexoffice-readiness-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Syntax check
+        run: node --check src/routes/live.js && node --check src/routes/stocks.js && node --check src/routes/reports.js && node --check src/routes/tools.js && node --check src/services/financialCalculators.js && node --check src/services/macroService.js && node --check src/server.js
+      - name: Educational calculator tests
+        run: node scripts/testEducationalCalculators.js
+      - name: Market freshness contract guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'dataUpdatedAt' src/routes/live.js
+          grep -q 'dataAgeSeconds' src/routes/live.js
+          grep -q 'providerTimestamp' src/routes/stocks.js
+          if grep -n 'data.t || Date.now' src/routes/stocks.js; then
+            echo 'Provider timestamp must never fall back to response time.'
+            exit 1
+          fi
+      - name: Macro integrity guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'observations' src/services/macroService.js
+          grep -q "source: 'unavailable'" src/services/macroService.js
+          grep -q 'signals: \[\]' src/services/macroService.js
+          if grep -nE 'fallbackMacro|fallback-offline|suggestedAction|buildSignals|aumentar exposição|atratividade relativa' src/services/macroService.js; then
+            echo 'Macro service must not fabricate current values or generate allocation/recommendation signals.'
+            exit 1
+          fi
+      - name: Valuation report integrity guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'verified valuation inputs required' src/routes/reports.js
+          grep -q 'não representa preço-alvo nem indicação de compra ou venda' src/routes/reports.js
+          if grep -nE '38\.52|45\.5|Sinal de Alocação|Upside Estimado' src/routes/reports.js; then
+            echo 'Valuation report contains hardcoded market/valuation values or allocation-signal language.'
+            exit 1
+          fi
+      - name: Calculation policy guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'recommendation: false' src/routes/tools.js
+          grep -q 'execution: false' src/routes/tools.js
+          grep -q 'externalMarketDataUsed: false' src/routes/tools.js
+          grep -q 'A alíquota de imposto é fornecida pelo usuário' src/services/financialCalculators.js
