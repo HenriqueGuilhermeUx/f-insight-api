@@ -18,6 +18,7 @@ const liveRoutes = require('./routes/live');
 const billingRoutes = require('./routes/billing');
 const automationRoutes = require('./routes/automation');
 const finsightAgentRoutes = require('./routes/finsightAgent');
+const toolsRoutes = require('./routes/tools');
 const internalMarketTerminalRoutes = require('./routes/internalMarketTerminal');
 const internalAdvisorIntelligenceRoutes = require('./routes/internalAdvisorIntelligence');
 const { startCronJobs } = require('./services/cronService');
@@ -85,6 +86,7 @@ app.use('/api/live', liveRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/automation', automationRoutes);
 app.use('/api/agent', finsightAgentRoutes);
+app.use('/api/tools', toolsRoutes);
 
 const internalMarketTerminalEnabled = process.env.INTERNAL_MARKET_TERMINAL_ENABLED === 'true';
 const internalAdvisorIntelligenceEnabled = process.env.INTERNAL_ADVISOR_INTELLIGENCE_ENABLED === 'true';
@@ -99,12 +101,12 @@ app.get('/', (req, res) => {
   res.json({
     name: 'F-Insight API',
     status: 'ok',
-    version: '1.7.0',
+    version: '1.8.0',
     supabase: isSupabaseEnabled(),
     cors: { netlifyAllowed: true, configuredOrigins: allowedOrigins },
     internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
     internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled',
-    modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing', 'automation-bridge', 'finsight-agent']
+    modules: ['market-data', 'macro', 'signals', 'white-label', 'reports', 'live-cron', 'supabase-cache', 'billing', 'automation-bridge', 'finsight-agent', 'educational-calculators']
   });
 });
 
@@ -112,10 +114,11 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.7.0',
+    version: '1.8.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled',
     agent: 'enabled',
+    calculators: 'educational-no-recommendation',
     internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
     internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled'
   });
@@ -125,10 +128,11 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '1.7.0',
+    version: '1.8.0',
     supabase: isSupabaseEnabled(),
     cors: 'netlify-enabled',
     agent: 'enabled',
+    calculators: 'educational-no-recommendation',
     internalMarketTerminal: internalMarketTerminalEnabled ? 'enabled-guarded' : 'disabled',
     internalAdvisorIntelligence: internalAdvisorIntelligenceEnabled ? 'enabled-guarded' : 'disabled'
   });
