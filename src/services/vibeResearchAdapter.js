@@ -142,6 +142,31 @@ async function listAlphas(options) {
   };
 }
 
+/**
+ * Read-only capability probe. Does not check credentials by attempting to
+ * submit benchmarks or start trading. The provider publishes readiness for
+ * supported backtest universes; this is NOT a guarantee of market data quality.
+ */
+async function researchReadiness(options) {
+  const data = await requestReadOnly('/alpha/readiness', options);
+  if (!data || typeof data !== 'object' ||
+      !data.universes || typeof data.universes !== 'object') {
+    throw new Error('VIBE_UNEXPECTED_READINESS_SHAPE');
+  }
+  const us = data.universes.sp500 || {};
+  const crypto = data.universes['btc-usdt'] || {};
+  return {
+    mode: 'read-only',
+    orderExecutionEnabled: false,
+    usEquityBacktestConfigured: us.ready === true,
+    cryptoCrossSectionalBacktestConfigured: crypto.ready === true,
+    checkedFromProvider: true,
+    // A provider readiness boolean is only a configuration preflight,
+    // never proof of data freshness, trades or backtest validity.
+    dataFreshnessVerified: false,
+  };
+}
+
 async function alphaMetadata(alphaId, options) {
   if (!ALPHA_ID.test(String(alphaId))) throw new Error('INVALID_ALPHA_ID');
   const data = await requestReadOnly('/alpha/' + alphaId, options);
@@ -164,4 +189,4 @@ async function alphaMetadata(alphaId, options) {
   };
 }
 
-module.exports = { listAlphas, alphaMetadata, validateBaseUrl, validateVibeListFilters };
+module.exports = { listAlphas, alphaMetadata, researchReadiness, validateBaseUrl, validateVibeListFilters };
