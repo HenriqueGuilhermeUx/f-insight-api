@@ -33,4 +33,5 @@ test('reads only the vetted alpha list endpoint', async () => {
 test('rejects path manipulation and code execution verbs', async () => {
   await assert.rejects(alphaMetadata('../settings/llm', {baseUrl:'http://localhost:8899'}), /INVALID_ALPHA_ID/);
   await assert.rejects(alphaMetadata('research?x=1', {baseUrl:'http://localhost:8899'}), /INVALID_ALPHA_ID/);
+  await assert.rejects(alphaMetadata('..', {baseUrl:'http://localhost:8899'}), /INVALID_ALPHA_ID/);
 });
