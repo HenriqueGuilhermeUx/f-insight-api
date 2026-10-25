@@ -48,3 +48,16 @@ Os parâmetros são construídos pela API, não repassados como URL de entrada.
 O Vibe Trading não fornece suporte generalizado à B3 nessa rota, portanto
 não anunciar cobertura brasileira com esse piloto. A origem deve permanecer
 autenticada, isolada e desabilitada em produção até homologação.
+
+## Staging provider readiness preflight
+
+`GET /api/internal/vibe-research/readiness` checks only the upstream
+`GET /alpha/readiness` route with the internal service key. Its allowlisted
+response discloses booleans for US-equities cross-sectional backtesting and
+BTC-USDT cross-sectional readiness. It **never** returns credentials, environment
+information, upstream file paths or token-missing reasons. This is configuration
+preflight only: `dataFreshnessVerified=false`, `orderExecutionEnabled=false`.
+
+Until a genuine isolated Vibe service is installed and authenticated in staging,
+all integration tests use a local mock server; therefore the actual provider
+connectivity and market datasets are **not yet homologated**.
