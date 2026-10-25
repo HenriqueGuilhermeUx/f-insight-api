@@ -27,7 +27,10 @@ test('Vibe HTTP endpoints are internal-only and read-only', async () => {
   const upstream = createServer((req, res) => {
     upstreamRequests.push({ method: req.method, path: req.url });
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(req.url.startsWith('/alpha/list')
+    res.end(JSON.stringify(req.url === '/alpha/readiness'
+      ? { universes: { sp500: { ready: true }, 'btc-usdt': { ready: false },
+          csi300: { ready: false, reason: 'token unavailable' } } }
+      : req.url.startsWith('/alpha/list')
       ? { status: 'ok', alphas: [{ id: 'alpha101_001', zoo: 'alpha101', theme: ['momentum'], universe: ['equity_us'] }], total: 1, returned: 1, truncated: false }
       : { status: 'ok', alpha: { id: 'alpha101_001', zoo: 'alpha101', module_path: '/private.py',
           meta: { theme: ['momentum'], universe: ['equity_us'], nickname: 'Test factor' } },
@@ -101,6 +104,16 @@ test('Vibe HTTP endpoints are internal-only and read-only', async () => {
     const method = await fetch(url + '/alphas', { method: 'POST', headers });
     assert.equal(method.status, 404);
     assert.equal(upstreamRequests.length, 3);
+
+    const readiness = await fetch(url + '/readiness', { headers });
+    assert.equal(readiness.status, 200);
+    const preflight = (await readiness.json()).data;
+    assert.equal(preflight.usEquityBacktestConfigured, true);
+    assert.equal(preflight.cryptoCrossSectionalBacktestConfigured, false);
+    assert.equal(preflight.orderExecutionEnabled, false);
+    assert.equal(preflight.dataFreshnessVerified, false);
+    assert.equal(upstreamRequests.at(-1).path, '/alpha/readiness');
+    assert.equal(upstreamRequests.at(-1).method, 'GET');
   } finally {
     if (server) await closeServer(server);
     await closeServer(upstream);
