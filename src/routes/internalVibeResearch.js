@@ -3,7 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const { requireInternalAccess } = require('../services/marketTerminal/internalAccess');
-const { listAlphas, alphaMetadata } = require('../services/vibeResearchAdapter');
+const { listAlphas, alphaMetadata, validateVibeListFilters } = require('../services/vibeResearchAdapter');
 
 // This adapter never accepts the legacy non-production unauthenticated
 // override used by other market-terminal endpoints. Fail closed everywhere.
@@ -23,9 +23,15 @@ router.get('/health', (_req, res) => {
   });
 });
 
-router.get('/alphas', async (_req, res) => {
+router.get('/alphas', async (req, res) => {
+  let filters;
   try {
-    const data = await listAlphas();
+    filters = validateVibeListFilters(req.query || {});
+  } catch {
+    return res.status(400).json({ ok: false, error: 'INVALID_RESEARCH_FILTERS' });
+  }
+  try {
+    const data = await listAlphas({ filters });
     return res.json({ ok: true, source: 'vibe-trading', researchOnly: true, data });
   } catch (_error) {
     return res.status(502).json({ ok: false, error: 'RESEARCH_UPSTREAM_UNAVAILABLE' });
