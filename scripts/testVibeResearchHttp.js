@@ -94,6 +94,10 @@ test('Vibe HTTP endpoints are internal-only and read-only', async () => {
     assert.equal(invalid.status, 400);
     assert.equal(upstreamRequests.length, 3);
 
+    const malformedId = await fetch(url + '/alphas/bad', { headers });
+    assert.equal(malformedId.status, 400);
+    assert.equal(upstreamRequests.length, 3);
+
     const method = await fetch(url + '/alphas', { method: 'POST', headers });
     assert.equal(method.status, 404);
     assert.equal(upstreamRequests.length, 3);
