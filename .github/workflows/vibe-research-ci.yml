@@ -1,0 +1,30 @@
+name: Vibe research adapter tests
+
+on:
+  pull_request:
+    paths:
+      - 'src/services/vibeResearchAdapter.js'
+      - 'src/routes/internalVibeResearch.js'
+      - 'scripts/testVibeResearchAdapter.js'
+      - '.github/workflows/vibe-research-ci.yml'
+  push:
+    branches:
+      - 'feat/vibe-readonly-pilot-20261025'
+    paths:
+      - 'src/services/vibeResearchAdapter.js'
+      - 'src/routes/internalVibeResearch.js'
+      - 'scripts/testVibeResearchAdapter.js'
+      - '.github/workflows/vibe-research-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Research adapter safety tests
+        run: node --test scripts/testVibeResearchAdapter.js
