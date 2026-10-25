@@ -3,7 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const { requireInternalAccess } = require('../services/marketTerminal/internalAccess');
-const { listAlphas, alphaMetadata, validateVibeListFilters } = require('../services/vibeResearchAdapter');
+const { listAlphas, alphaMetadata, researchReadiness, validateVibeListFilters } = require('../services/vibeResearchAdapter');
 
 // This adapter never accepts the legacy non-production unauthenticated
 // override used by other market-terminal endpoints. Fail closed everywhere.
@@ -21,6 +21,16 @@ router.get('/health', (_req, res) => {
     execution: false,
     upstreamConfigured: Boolean(process.env.VIBE_RESEARCH_BASE_URL),
   });
+});
+
+router.get('/readiness', async (_req, res) => {
+  try {
+    const data = await researchReadiness();
+    return res.header('cache-control', 'no-store')
+      .json({ ok: true, source: 'vibe-trading', researchOnly: true, data });
+  } catch (_error) {
+    return res.status(502).json({ ok: false, error: 'RESEARCH_UPSTREAM_UNAVAILABLE' });
+  }
 });
 
 router.get('/alphas', async (req, res) => {
