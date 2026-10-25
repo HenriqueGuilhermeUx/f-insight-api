@@ -50,7 +50,7 @@ function listAlphas(options) {
 }
 
 function alphaMetadata(alphaId, options) {
-  if (!/^[a-zA-Z0-9_.-]{1,90}$/.test(String(alphaId))) throw new Error('INVALID_ALPHA_ID');
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,89}$/.test(String(alphaId))) throw new Error('INVALID_ALPHA_ID');
   return requestReadOnly('/alpha/' + alphaId, options);
 }
 
