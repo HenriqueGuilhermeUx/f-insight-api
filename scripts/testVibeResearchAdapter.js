@@ -35,3 +35,24 @@ test('rejects path manipulation and code execution verbs', async () => {
   assert.throws(() => alphaMetadata('research?x=1', {baseUrl:'http://localhost:8899'}), /INVALID_ALPHA_ID/);
   assert.throws(() => alphaMetadata('..', {baseUrl:'http://localhost:8899'}), /INVALID_ALPHA_ID/);
 });
+
+
+test('blocks unbounded streaming research responses before buffering', async () => {
+  const upstream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(512 * 1024 + 100));
+      controller.close();
+    },
+  });
+  await assert.rejects(
+    listAlphas({
+      baseUrl: 'https://vibe.staging.example',
+      fetcher: async () => ({
+        ok: true,
+        headers: { get: (key) => key === 'content-type' ? 'application/json' : null },
+        body: upstream,
+      }),
+    }),
+    /VIBE_RESPONSE_TOO_LARGE/,
+  );
+});
