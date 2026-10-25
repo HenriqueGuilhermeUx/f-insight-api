@@ -20,6 +20,7 @@ const automationRoutes = require('./routes/automation');
 const finsightAgentRoutes = require('./routes/finsightAgent');
 const internalMarketTerminalRoutes = require('./routes/internalMarketTerminal');
 const internalAdvisorIntelligenceRoutes = require('./routes/internalAdvisorIntelligence');
+const internalVibeResearchRoutes = require('./routes/internalVibeResearch');
 const { startCronJobs } = require('./services/cronService');
 const { isSupabaseEnabled } = require('./services/supabaseClient');
 
@@ -93,6 +94,10 @@ if (internalMarketTerminalEnabled) {
 }
 if (internalAdvisorIntelligenceEnabled) {
   app.use('/api/internal/advisor-intelligence', internalAdvisorIntelligenceRoutes);
+}
+const internalVibeResearchEnabled = process.env.INTERNAL_VIBE_RESEARCH_ENABLED === 'true';
+if (internalVibeResearchEnabled) {
+  app.use('/api/internal/vibe-research', internalVibeResearchRoutes);
 }
 
 app.get('/', (req, res) => {
