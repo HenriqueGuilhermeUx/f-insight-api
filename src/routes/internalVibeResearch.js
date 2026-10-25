@@ -5,7 +5,14 @@ const router = express.Router();
 const { requireInternalAccess } = require('../services/marketTerminal/internalAccess');
 const { listAlphas, alphaMetadata } = require('../services/vibeResearchAdapter');
 
-router.use(requireInternalAccess);
+// This adapter never accepts the legacy non-production unauthenticated
+// override used by other market-terminal endpoints. Fail closed everywhere.
+router.use((req, res, next) => {
+  if (!process.env.FINSIGHT_INTERNAL_API_KEY) {
+    return res.status(503).json({ ok: false, error: 'RESEARCH_AUTH_NOT_CONFIGURED' });
+  }
+  return requireInternalAccess(req, res, next);
+});
 
 router.get('/health', (_req, res) => {
   res.json({
