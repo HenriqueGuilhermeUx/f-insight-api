@@ -6,6 +6,7 @@ on:
       - 'src/services/vibeResearchAdapter.js'
       - 'src/routes/internalVibeResearch.js'
       - 'scripts/testVibeResearchAdapter.js'
+      - 'scripts/testVibeResearchHttp.js'
       - '.github/workflows/vibe-research-ci.yml'
   push:
     branches:
@@ -14,6 +15,7 @@ on:
       - 'src/services/vibeResearchAdapter.js'
       - 'src/routes/internalVibeResearch.js'
       - 'scripts/testVibeResearchAdapter.js'
+      - 'scripts/testVibeResearchHttp.js'
       - '.github/workflows/vibe-research-ci.yml'
 
 jobs:
@@ -26,5 +28,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Research adapter safety tests
-        run: node --test scripts/testVibeResearchAdapter.js
+      - name: Install API test dependencies
+        run: npm ci --omit=dev
+      - name: Research adapter and HTTP boundary tests
+        run: node --test scripts/testVibeResearchAdapter.js scripts/testVibeResearchHttp.js
