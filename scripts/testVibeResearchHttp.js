@@ -21,6 +21,7 @@ test('Vibe HTTP endpoints are internal-only and read-only', async () => {
     FINSIGHT_INTERNAL_API_KEY: process.env.FINSIGHT_INTERNAL_API_KEY,
     VIBE_RESEARCH_BASE_URL: process.env.VIBE_RESEARCH_BASE_URL,
     VIBE_RESEARCH_API_KEY: process.env.VIBE_RESEARCH_API_KEY,
+    INTERNAL_MARKET_TERMINAL_ALLOW_UNAUTH: process.env.INTERNAL_MARKET_TERMINAL_ALLOW_UNAUTH,
   };
   const upstreamRequests = [];
   const upstream = createServer((req, res) => {
@@ -49,6 +50,15 @@ test('Vibe HTTP endpoints are internal-only and read-only', async () => {
     const noKey = await fetch(url + '/alphas');
     assert.equal(noKey.status, 401);
     assert.equal(upstreamRequests.length, 0);
+
+    // Legacy test-mode override must never unlock the Vibe integration.
+    process.env.INTERNAL_MARKET_TERMINAL_ALLOW_UNAUTH = 'true';
+    delete process.env.FINSIGHT_INTERNAL_API_KEY;
+    const overrideAttempt = await fetch(url + '/alphas');
+    assert.equal(overrideAttempt.status, 503);
+    assert.equal(upstreamRequests.length, 0);
+    process.env.FINSIGHT_INTERNAL_API_KEY = 'ci-test-only-internal-key-123';
+    delete process.env.INTERNAL_MARKET_TERMINAL_ALLOW_UNAUTH;
 
     const headers = { 'X-FInsight-Internal-Key': process.env.FINSIGHT_INTERNAL_API_KEY };
     const ready = await fetch(url + '/health', { headers });
