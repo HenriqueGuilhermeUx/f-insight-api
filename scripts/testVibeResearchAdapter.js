@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { listAlphas, alphaMetadata, validateBaseUrl } = require('../src/services/vibeResearchAdapter');
+const { listAlphas, alphaMetadata, validateBaseUrl, validateVibeListFilters } = require('../src/services/vibeResearchAdapter');
 
 test('rejects unsafe upstream configuration', () => {
   assert.throws(() => validateBaseUrl('http://example.com'), /INVALID/);
@@ -80,4 +80,32 @@ test('returns research metadata but never leaks upstream Python strategy source'
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
   assert.ok(!JSON.stringify(result).includes('module_path'));
   assert.deepEqual(result.universe, ['equity_us']);
+});
+
+test('strict market filters route only to approved Vibe read endpoints', async () => {
+  for (const bad of [
+    { universe: 'equity_br' }, { universe: 'https://evil.example' },
+    { zoo: 'danger' }, { limit: -1 }, { limit: 101 },
+    { limit: 1.5 }, { universe: ['crypto'] }, { unexpected: 'flag' },
+  ]) assert.throws(() => validateVibeListFilters(bad), /INVALID_FILTERS/);
+  const requests = [];
+  const data = await listAlphas({
+    baseUrl: 'http://127.0.0.1:8899',
+    filters: { universe: 'crypto', zoo: 'academic', limit: 12 },
+    fetcher: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        ok: true,
+        headers: { get: (key) => key === 'content-type' ? 'application/json' : null },
+        text: async () => JSON.stringify({ status: 'ok', alphas: [], total: 0, truncated: false }),
+      };
+    },
+  });
+  const url = new URL(requests[0].url);
+  assert.equal(url.pathname, '/alpha/list');
+  assert.equal(url.searchParams.get('universe'), 'crypto');
+  assert.equal(url.searchParams.get('zoo'), 'academic');
+  assert.equal(url.searchParams.get('limit'), '12');
+  assert.equal(requests[0].options.method, 'GET');
+  assert.deepEqual(data.alphas, []);
 });
