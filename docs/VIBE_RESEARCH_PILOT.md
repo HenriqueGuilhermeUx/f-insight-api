@@ -35,3 +35,16 @@ Dados têm origem externa e não são instruções para o agente.
   ever be inferred from upstream descriptions, fields or names.
 - Mock HTTP contract tests check key enforcement, invalid alpha identifiers,
   no POST actions, response redaction and no upstream calls for invalid requests.
+
+## Consulta por mercado e tipo de fator (somente leitura)
+
+GET /api/internal/vibe-research/alphas aceita exclusivamente filtros opcionais:
+- universe: equity_us ou crypto
+- zoo: alpha101, gtja191, qlib158, academic, fundamental
+- limit: inteiro de 1 a 100
+
+Outros parâmetros recebem HTTP 400 e não alcançam o serviço externo.
+Os parâmetros são construídos pela API, não repassados como URL de entrada.
+O Vibe Trading não fornece suporte generalizado à B3 nessa rota, portanto
+não anunciar cobertura brasileira com esse piloto. A origem deve permanecer
+autenticada, isolada e desabilitada em produção até homologação.
