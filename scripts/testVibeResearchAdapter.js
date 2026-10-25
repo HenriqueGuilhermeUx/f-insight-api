@@ -20,11 +20,11 @@ test('reads only the vetted alpha list endpoint', async () => {
       return {
         ok: true,
         headers: { get: (key) => key === 'content-type' ? 'application/json' : null },
-        text: async () => '{"alphas":[]}',
+        text: async () => '{"status":"ok","alphas":[],"total":0,"truncated":false}',
       };
     },
   });
-  assert.deepEqual(result, { alphas: [] });
+  assert.deepEqual(result, { alphas: [], total: 0, truncated: false });
   assert.equal(new URL(requests[0].url).pathname, '/alpha/list');
   assert.equal(requests[0].args.method, 'GET');
   assert.equal(requests[0].args.redirect, 'error');
@@ -55,4 +55,29 @@ test('blocks unbounded streaming research responses before buffering', async () 
     }),
     /VIBE_RESPONSE_TOO_LARGE/,
   );
+});
+
+
+test('returns research metadata but never leaks upstream Python strategy source', async () => {
+  const result = await alphaMetadata('alpha101_001', {
+    baseUrl: 'http://localhost:8899',
+    fetcher: async () => ({
+      ok: true,
+      headers: { get: (key) => key === 'content-type' ? 'application/json' : null },
+      text: async () => JSON.stringify({
+        status: 'ok',
+        alpha: {
+          id: 'alpha101_001', zoo: 'alpha101',
+          module_path: '/run/secrets/very-private.py',
+          meta: { theme: ['momentum'], universe: ['equity_us'], nickname: 'Research indicator' },
+        },
+        source_code: 'print("PRIVATE")',
+      }),
+    }),
+  });
+  assert.equal(result.id, 'alpha101_001');
+  assert.equal(result.sourceCodeIncluded, false);
+  assert.ok(!JSON.stringify(result).includes('PRIVATE'));
+  assert.ok(!JSON.stringify(result).includes('module_path'));
+  assert.deepEqual(result.universe, ['equity_us']);
 });
