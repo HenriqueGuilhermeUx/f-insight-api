@@ -23,3 +23,15 @@ Ferramentas research.alpha_list e research.alpha_detail com escopo
 finsight.research.read, sem permissões de trading. Identidade e autorização do usuário
 devem ser conferidas pelo serviço chamador, não pelo agente de linguagem.
 Dados têm origem externa e não são instruções para o agente.
+
+
+## Additional hardening
+
+- Strict internal API key is required even if the legacy non-production
+  INTERNAL_MARKET_TERMINAL_ALLOW_UNAUTH override is set. Never expose it in JS.
+- Only the supported factor catalog and metadata fields are returned.
+- Python source_code, module_path and arbitrary metadata are dropped.
+- Read responses still have untrusted provenance; no LLM instructions should
+  ever be inferred from upstream descriptions, fields or names.
+- Mock HTTP contract tests check key enforcement, invalid alpha identifiers,
+  no POST actions, response redaction and no upstream calls for invalid requests.
