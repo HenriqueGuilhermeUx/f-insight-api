@@ -21,6 +21,14 @@ async function requestReadOnly(path, options = {}) {
     throw new Error('DISALLOWED_RESEARCH_ROUTE');
   }
   const target = new URL(relative, base);
+  if (relative === '/alpha/list') {
+    const filters = validateVibeListFilters(options.filters || {});
+    if (filters.universe) target.searchParams.set('universe', filters.universe);
+    if (filters.zoo) target.searchParams.set('zoo', filters.zoo);
+    if (filters.limit) target.searchParams.set('limit', String(filters.limit));
+  } else if (options.filters !== undefined) {
+    throw new Error('DISALLOWED_RESEARCH_FILTER');
+  }
   const fetcher = options.fetcher || fetch;
   const apiKey = options.apiKey ?? process.env.VIBE_RESEARCH_API_KEY;
   const controller = new AbortController();
@@ -68,6 +76,25 @@ async function requestReadOnly(path, options = {}) {
 }
 
 const ALPHA_ID = /^[a-z][a-z0-9]+_[a-z0-9_]{1,64}$/;
+const VIBE_UNIVERSES = new Set(['equity_us', 'crypto']);
+const VIBE_ZOOS = new Set(['alpha101', 'gtja191', 'qlib158', 'academic', 'fundamental']);
+
+function validateVibeListFilters(filters = {}) {
+  if (!filters || typeof filters !== 'object' || Array.isArray(filters) ||
+      Object.keys(filters).some((key) => !['universe', 'zoo', 'limit'].includes(key))) {
+    throw new Error('VIBE_INVALID_FILTERS');
+  }
+  const universe = filters.universe;
+  const zoo = filters.zoo;
+  const limit = filters.limit === undefined ? undefined : Number(filters.limit);
+  if ((universe !== undefined && (typeof universe !== 'string' || !VIBE_UNIVERSES.has(universe))) ||
+      (zoo !== undefined && (typeof zoo !== 'string' || !VIBE_ZOOS.has(zoo))) ||
+      (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100))) {
+    throw new Error('VIBE_INVALID_FILTERS');
+  }
+  return { universe, zoo, limit };
+}
+
 
 function shortString(value, limit = 160) {
   return typeof value === 'string' ? value.slice(0, limit) : null;
@@ -137,4 +164,4 @@ async function alphaMetadata(alphaId, options) {
   };
 }
 
-module.exports = { listAlphas, alphaMetadata, validateBaseUrl };
+module.exports = { listAlphas, alphaMetadata, validateBaseUrl, validateVibeListFilters };
