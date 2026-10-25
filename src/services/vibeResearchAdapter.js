@@ -37,6 +37,28 @@ async function requestReadOnly(path, options = {}) {
     if (!type.toLowerCase().includes('application/json')) throw new Error('VIBE_NOT_JSON');
     const declared = Number(response.headers.get('content-length') || 0);
     if (declared > MAX_BODY_BYTES) throw new Error('VIBE_RESPONSE_TOO_LARGE');
+    // Enforce the bound while streaming, even if upstream omits Content-Length.
+    // Avoid loading an arbitrarily large remote response before checking its size.
+    if (response.body && typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader();
+      const chunks = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > MAX_BODY_BYTES) {
+            await reader.cancel().catch(() => {});
+            throw new Error('VIBE_RESPONSE_TOO_LARGE');
+          }
+          chunks.push(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      return JSON.parse(Buffer.concat(chunks.map((v) => Buffer.from(v)), size).toString('utf8'));
+    }
     const content = await response.text();
     if (Buffer.byteLength(content, 'utf8') > MAX_BODY_BYTES) throw new Error('VIBE_RESPONSE_TOO_LARGE');
     return JSON.parse(content);
