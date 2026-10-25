@@ -27,7 +27,7 @@ test('Vibe HTTP endpoints are internal-only and read-only', async () => {
   const upstream = createServer((req, res) => {
     upstreamRequests.push({ method: req.method, path: req.url });
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(req.url === '/alpha/list'
+    res.end(JSON.stringify(req.url.startsWith('/alpha/list')
       ? { status: 'ok', alphas: [{ id: 'alpha101_001', zoo: 'alpha101', theme: ['momentum'], universe: ['equity_us'] }], total: 1, returned: 1, truncated: false }
       : { status: 'ok', alpha: { id: 'alpha101_001', zoo: 'alpha101', module_path: '/private.py',
           meta: { theme: ['momentum'], universe: ['equity_us'], nickname: 'Test factor' } },
@@ -79,13 +79,24 @@ test('Vibe HTTP endpoints are internal-only and read-only', async () => {
       { method: 'GET', path: '/alpha/alpha101_001' },
     ]);
 
+    const filtered = await fetch(url + '/alphas?universe=equity_us&zoo=academic&limit=10', { headers });
+    assert.equal(filtered.status, 200);
+    assert.equal((await filtered.json()).data.alphas.length, 1);
+    assert.deepEqual(upstreamRequests.at(-1), {
+      method: 'GET', path: '/alpha/list?universe=equity_us&zoo=academic&limit=10',
+    });
+    const beforeBad = upstreamRequests.length;
+    const forbidden = await fetch(url + '/alphas?universe=equity_br', { headers });
+    assert.equal(forbidden.status, 400);
+    assert.equal(upstreamRequests.length, beforeBad);
+
     const invalid = await fetch(url + '/alphas/..%2Fsettings%2Fllm', { headers });
     assert.equal(invalid.status, 400);
-    assert.equal(upstreamRequests.length, 2);
+    assert.equal(upstreamRequests.length, 3);
 
     const method = await fetch(url + '/alphas', { method: 'POST', headers });
     assert.equal(method.status, 404);
-    assert.equal(upstreamRequests.length, 2);
+    assert.equal(upstreamRequests.length, 3);
   } finally {
     if (server) await closeServer(server);
     await closeServer(upstream);
