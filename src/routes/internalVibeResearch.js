@@ -39,7 +39,7 @@ router.get('/alphas', async (req, res) => {
 });
 
 router.get('/alphas/:id', async (req, res) => {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,89}$/.test(req.params.id)) {
+  if (!/^[a-z][a-z0-9]+_[a-z0-9_]{1,64}$/.test(req.params.id)) {
     return res.status(400).json({ ok: false, error: 'INVALID_ALPHA_ID' });
   }
   try {
