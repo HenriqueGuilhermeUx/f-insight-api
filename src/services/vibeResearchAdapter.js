@@ -31,6 +31,9 @@ function validateBaseUrl(raw) {
     if (url.protocol !== 'https:' || allowUrl.protocol !== 'https:' ||
         host === 'localhost' || isIP(host) !== 0 ||
         host.startsWith('[') || !host.includes('.') ||
+        // A trailing DNS root dot can bypass checks for .internal/.local,
+        // and should never appear in a pinned research-service origin.
+        host.endsWith('.') || host.startsWith('.') || host.includes('..') ||
         ['.local', '.localhost', '.internal', '.invalid'].some((suffix) => host.endsWith(suffix)) ||
         allowUrl.username || allowUrl.password || allowUrl.search || allowUrl.hash ||
         allowUrl.pathname !== '/' || url.origin !== allowUrl.origin) {
