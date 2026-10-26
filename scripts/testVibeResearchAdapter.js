@@ -109,3 +109,47 @@ test('strict market filters route only to approved Vibe read endpoints', async (
   assert.equal(requests[0].options.method, 'GET');
   assert.deepEqual(data.alphas, []);
 });
+
+test('production and strict staging fail closed unless HTTPS origin is pinned', async () => {
+  const env = {
+    NODE_ENV: process.env.NODE_ENV,
+    VIBE_RESEARCH_STRICT_EGRESS: process.env.VIBE_RESEARCH_STRICT_EGRESS,
+    VIBE_RESEARCH_ALLOWED_ORIGIN: process.env.VIBE_RESEARCH_ALLOWED_ORIGIN,
+  };
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.VIBE_RESEARCH_ALLOWED_ORIGIN;
+    assert.throws(() => validateBaseUrl('https://vibe-research.example.com'),
+      /ALLOWED_ORIGIN_REQUIRED/);
+
+    process.env.VIBE_RESEARCH_ALLOWED_ORIGIN = 'https://vibe-research.example.com';
+    assert.equal(validateBaseUrl('https://vibe-research.example.com').origin,
+      'https://vibe-research.example.com');
+    assert.throws(() => validateBaseUrl('https://different.example.com'),
+      /ORIGIN_NOT_ALLOWED/);
+    assert.throws(() => validateBaseUrl('http://127.0.0.1:8899'),
+      /INVALID_VIBE_RESEARCH_BASE_URL/);
+    assert.throws(() => validateBaseUrl('https://metadata.internal'),
+      /ORIGIN_NOT_ALLOWED/);
+    assert.throws(() => validateBaseUrl('https://127.0.0.1'),
+      /ORIGIN_NOT_ALLOWED/);
+    assert.throws(() => validateBaseUrl('https://vibe-research.example.com/other'),
+      /INVALID_VIBE_RESEARCH_BASE_URL/);
+    process.env.VIBE_RESEARCH_ALLOWED_ORIGIN = 'https://vibe-research.example.com/path';
+    assert.throws(() => validateBaseUrl('https://vibe-research.example.com'),
+      /ORIGIN_NOT_ALLOWED/);
+
+    process.env.NODE_ENV = 'test';
+    process.env.VIBE_RESEARCH_STRICT_EGRESS = 'true';
+    process.env.VIBE_RESEARCH_ALLOWED_ORIGIN = 'https://vibe-research.example.com';
+    assert.equal(validateBaseUrl('https://vibe-research.example.com').hostname,
+      'vibe-research.example.com');
+    assert.throws(() => validateBaseUrl('http://localhost:8899'),
+      /ORIGIN_NOT_ALLOWED/);
+  } finally {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
