@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { test } = require('node:test');
 
-const source = readFileSync(process.argv[2] || '', 'utf8');
+const source = readFileSync(process.env.VIBE_PINNED_CONTRACT_FILE || '', 'utf8');
 const path = 'HKUDS/Vibe-Trading @ 3910bad3c9197de6c1fc6f28a3925ee8729c1a65';
 
 test('pinned Vibe API source exposes only expected authenticated read contracts', () => {
