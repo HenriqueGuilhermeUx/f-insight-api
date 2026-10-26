@@ -5,11 +5,35 @@ const TIMEOUT_MS = 6500;
 
 function validateBaseUrl(raw) {
   if (!raw) throw new Error('VIBE_RESEARCH_BASE_URL_NOT_CONFIGURED');
-  const url = new URL(raw);
+  let url;
+  try { url = new URL(raw); } catch { throw new Error('INVALID_VIBE_RESEARCH_BASE_URL'); }
   const localhost = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  if ((url.protocol !== 'https:' && !(localhost && url.protocol === 'http:')) ||
-      url.username || url.password || url.search || url.hash) {
+  if ((url.protocol !== 'https:' && !(localhost && url.protocol === 'http:' &&
+      process.env.NODE_ENV !== 'production')) ||
+      url.username || url.password || url.search || url.hash ||
+      !['', '/'].includes(url.pathname)) {
     throw new Error('INVALID_VIBE_RESEARCH_BASE_URL');
+  }
+  const strict = process.env.NODE_ENV === 'production' ||
+    process.env.VIBE_RESEARCH_STRICT_EGRESS === 'true';
+  if (strict) {
+    const approved = process.env.VIBE_RESEARCH_ALLOWED_ORIGIN;
+    if (!approved) throw new Error('VIBE_RESEARCH_ALLOWED_ORIGIN_REQUIRED');
+    let allowUrl;
+    try { allowUrl = new URL(approved); } catch {
+      throw new Error('INVALID_VIBE_RESEARCH_ALLOWED_ORIGIN');
+    }
+    // Reject loopback, internal suffixes and numeric hosts. Only an explicit
+    // HTTPS DNS origin may be pinned. DNS/network isolation remains an infra task.
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:' || allowUrl.protocol !== 'https:' ||
+        host === 'localhost' || /^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(host) ||
+        host.startsWith('[') || !host.includes('.') ||
+        /\\.(?:local|localhost|internal|invalid)$/.test(host) ||
+        allowUrl.username || allowUrl.password || allowUrl.search || allowUrl.hash ||
+        allowUrl.pathname !== '/' || url.origin !== allowUrl.origin) {
+      throw new Error('VIBE_RESEARCH_ORIGIN_NOT_ALLOWED');
+    }
   }
   return url;
 }
