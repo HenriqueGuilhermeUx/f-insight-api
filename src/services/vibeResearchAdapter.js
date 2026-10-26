@@ -1,5 +1,7 @@
 'use strict';
 
+const { isIP } = require('node:net');
+
 const MAX_BODY_BYTES = 512 * 1024;
 const TIMEOUT_MS = 6500;
 
@@ -27,9 +29,9 @@ function validateBaseUrl(raw) {
     // HTTPS DNS origin may be pinned. DNS/network isolation remains an infra task.
     const host = url.hostname.toLowerCase();
     if (url.protocol !== 'https:' || allowUrl.protocol !== 'https:' ||
-        host === 'localhost' || /^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(host) ||
+        host === 'localhost' || isIP(host) !== 0 ||
         host.startsWith('[') || !host.includes('.') ||
-        /\\.(?:local|localhost|internal|invalid)$/.test(host) ||
+        ['.local', '.localhost', '.internal', '.invalid'].some((suffix) => host.endsWith(suffix)) ||
         allowUrl.username || allowUrl.password || allowUrl.search || allowUrl.hash ||
         allowUrl.pathname !== '/' || url.origin !== allowUrl.origin) {
       throw new Error('VIBE_RESEARCH_ORIGIN_NOT_ALLOWED');
