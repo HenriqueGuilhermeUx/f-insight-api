@@ -61,3 +61,19 @@ preflight only: `dataFreshnessVerified=false`, `orderExecutionEnabled=false`.
 Until a genuine isolated Vibe service is installed and authenticated in staging,
 all integration tests use a local mock server; therefore the actual provider
 connectivity and market datasets are **not yet homologated**.
+
+## Upstream destination pinning (required for production; recommended for staging)
+
+Never connect this route to a caller-provided URL or public browser.
+The adapter rejects HTTP except loopback in non-production tests. In production
+it requires `VIBE_RESEARCH_ALLOWED_ORIGIN=https://your-research-provider.example`
+to match exactly the `VIBE_RESEARCH_BASE_URL` HTTPS origin. To enforce
+the same policy in staging set `VIBE_RESEARCH_STRICT_EGRESS=true`.
+
+Private IP literals, loopback hosts and common internal DNS suffixes are
+rejected under the strict policy. **DNS rebinding remains an infrastructure
+risk**: restrict the container's egress, internal network destinations,
+resolver policy and service account privileges independently of this code.
+Never assign a generic open proxy or intranet URL as the upstream origin.
+Provider secrets must stay on the server. Do not enable the F-Insight feature
+flag until this security gate and actual service-auth tests pass.
