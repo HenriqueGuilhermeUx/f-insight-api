@@ -31,4 +31,4 @@ jobs:
             "https://raw.githubusercontent.com/HKUDS/Vibe-Trading/3910bad3c9197de6c1fc6f28a3925ee8729c1a65/agent/src/api/alpha_routes.py"
           test "$(wc -c < "$RUNNER_TEMP/vibe-alpha-routes.py")" -lt 250000
       - name: Verify provider API and auth annotations
-        run: node --test scripts/testVibeProviderContract.js "$RUNNER_TEMP/vibe-alpha-routes.py"
+        run: VIBE_PINNED_CONTRACT_FILE="$RUNNER_TEMP/vibe-alpha-routes.py" node --test scripts/testVibeProviderContract.js
