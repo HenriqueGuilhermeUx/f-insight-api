@@ -138,6 +138,14 @@ test('production and strict staging fail closed unless HTTPS origin is pinned', 
     process.env.VIBE_RESEARCH_ALLOWED_ORIGIN = 'https://vibe-research.example.com/path';
     assert.throws(() => validateBaseUrl('https://vibe-research.example.com'),
       /ORIGIN_NOT_ALLOWED/);
+    // Exact allowlist match alone is not sufficient: a DNS trailing root dot
+    // must not bypass blocked internal suffixes or permit alias hostnames.
+    process.env.VIBE_RESEARCH_ALLOWED_ORIGIN = 'https://vibe-research.example.com.';
+    assert.throws(() => validateBaseUrl('https://vibe-research.example.com.'),
+      /ORIGIN_NOT_ALLOWED/);
+    process.env.VIBE_RESEARCH_ALLOWED_ORIGIN = 'https://metadata.internal.';
+    assert.throws(() => validateBaseUrl('https://metadata.internal.'),
+      /ORIGIN_NOT_ALLOWED/);
 
     process.env.NODE_ENV = 'test';
     process.env.VIBE_RESEARCH_STRICT_EGRESS = 'true';
